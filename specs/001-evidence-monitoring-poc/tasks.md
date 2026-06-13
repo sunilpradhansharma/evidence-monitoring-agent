@@ -68,16 +68,16 @@ audits every call, and resumes from the last completed question.
 (question × target) with SUCCESS/FAILED/TRUNCATED/BLOCKED, append-only audit entries, and that
 `--resume` skips completed questions.
 
-- [ ] T021 [US1] Implement the adapter protocol (retry + exponential backoff + rate limiting + OFFLINE/MOCK mode) in `src/evidence_monitor/llm/adapters/base.py` per contracts/llm-adapter.md
-- [ ] T022 [P] [US1] Unit test for base adapter retry/backoff + deterministic mock in `tests/unit/test_adapter_base.py`
-- [ ] T023 [P] [US1] Implement the OpenAI GPT-4o adapter in `src/evidence_monitor/llm/adapters/openai_gpt4o.py`
-- [ ] T024 [P] [US1] Unit test (mock mode) for the OpenAI adapter in `tests/unit/test_openai_adapter.py`
-- [ ] T025 [P] [US1] Implement the Gemini adapter with safety-block → BLOCKED mapping in `src/evidence_monitor/llm/adapters/gemini.py`
-- [ ] T026 [P] [US1] Unit test (mock mode, BLOCKED path) for the Gemini adapter in `tests/unit/test_gemini_adapter.py`
-- [ ] T027 [P] [US1] Implement the Claude-as-end-user target adapter in `src/evidence_monitor/llm/adapters/claude_target.py`
-- [ ] T028 [P] [US1] Unit test (mock mode) for the Claude target adapter in `tests/unit/test_claude_target_adapter.py`
-- [ ] T029 [P] [US1] Implement the conditional Open Evidence adapter (PROVIDER persona only, enabled by config) in `src/evidence_monitor/llm/adapters/open_evidence.py`
-- [ ] T030 [P] [US1] Unit test for Open Evidence gating (skipped when disabled / non-Provider) in `tests/unit/test_open_evidence_adapter.py`
+- [X] T021 [US1] Implement the adapter protocol (retry + exponential backoff + rate limiting + OFFLINE/MOCK mode) in `src/evidence_monitor/llm/adapters/base.py` per contracts/llm-adapter.md
+- [X] T022 [P] [US1] Unit test for base adapter retry/backoff + deterministic mock in `tests/unit/test_adapter_base.py`
+- [X] T023 [P] [US1] Implement the OpenAI GPT-4o adapter in `src/evidence_monitor/llm/adapters/openai_gpt4o.py`
+- [X] T024 [P] [US1] Unit test (mock mode) for the OpenAI adapter in `tests/unit/test_openai_adapter.py`
+- [X] T025 [P] [US1] Implement the Gemini adapter with safety-block → BLOCKED mapping in `src/evidence_monitor/llm/adapters/gemini.py`
+- [X] T026 [P] [US1] Unit test (mock mode, BLOCKED path) for the Gemini adapter in `tests/unit/test_gemini_adapter.py`
+- [X] T027 [P] [US1] Implement the Claude-as-end-user target adapter in `src/evidence_monitor/llm/adapters/claude_target.py`
+- [X] T028 [P] [US1] Unit test (mock mode) for the Claude target adapter in `tests/unit/test_claude_target_adapter.py`
+- [X] T029 [P] [US1] Implement the conditional Open Evidence adapter (PROVIDER persona only, enabled by config) in `src/evidence_monitor/llm/adapters/open_evidence.py`
+- [X] T030 [P] [US1] Unit test for Open Evidence gating (skipped when disabled / non-Provider) in `tests/unit/test_open_evidence_adapter.py`
 - [ ] T031 [US1] Implement the Claude orchestrator client (model id from config) in `src/evidence_monitor/llm/client.py`
 - [ ] T032 [P] [US1] Unit test for the orchestrator client config sourcing in `tests/unit/test_llm_client.py`
 - [ ] T033 [US1] Implement immutable Response writes in `src/evidence_monitor/response_repo/repository.py`
