@@ -53,8 +53,9 @@ def test_import_meets_sc004_minimums(store):
     for persona in (Persona.PROSPECT, Persona.PROVIDER, Persona.PATIENT):
         assert report.by_persona.get(str(persona), 0) >= 30, report.by_persona
 
-    # Spans the three expected therapeutic areas (≥2 required by SC-004).
-    assert {"Immunology", "Oncology", "Neuroscience"} <= set(report.by_therapeutic_area)
+    # Spans at least two therapeutic areas (SC-004) — assert the count, not the names, so the
+    # test stays content-agnostic; therapeutic-area names live only in data (Principle IV).
+    assert len(report.by_therapeutic_area) >= 2, report.by_therapeutic_area
 
 
 def test_reimport_is_idempotent_no_duplicates(store):

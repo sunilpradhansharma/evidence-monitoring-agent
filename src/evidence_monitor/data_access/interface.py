@@ -133,6 +133,17 @@ class ResponseRepository(Protocol):
 
     def get(self, response_id: str) -> Response | None: ...
 
+    def query(
+        self, filters: QueryFilters, *, page: int = 1, page_size: int | None = 50
+    ) -> Page[Response]:
+        """Filtered, paginated reads across every query dimension (FR-012).
+
+        ``page_size=None`` returns all matching rows in one page (used by exports so a view and
+        its export match). Sentiment filters read the response's *latest* scoring version; a
+        response with no score is excluded when a sentiment bound is set.
+        """
+        ...
+
 
 @runtime_checkable
 class ScoringRepository(Protocol):

@@ -19,7 +19,7 @@ import sqlite3
 from datetime import UTC, datetime
 
 from evidence_monitor.data_access.audit import SqliteAuditWriter
-from evidence_monitor.data_access.interface import RunTotals
+from evidence_monitor.data_access.interface import Page, QueryFilters, RunTotals
 from evidence_monitor.data_access.models import (
     ALERT_SEVERITY,
     Alert,
@@ -34,7 +34,8 @@ from evidence_monitor.data_access.models import (
     ScoringRecord,
     TriggerType,
 )
-from evidence_monitor.response_repo.schema import FinishReason, Response, ResponseStatus
+from evidence_monitor.data_access.queries import query_responses, row_to_response
+from evidence_monitor.response_repo.schema import Response
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS questions (
@@ -307,7 +308,13 @@ class _ResponseRepo:
         row = self._conn.execute(
             "SELECT * FROM responses WHERE response_id = ?", (response_id,)
         ).fetchone()
-        return _row_to_response(row) if row else None
+        return row_to_response(row) if row else None
+
+    def query(
+        self, filters: QueryFilters, *, page: int = 1, page_size: int | None = 50
+    ) -> Page[Response]:
+        """Filtered/paginated reads across every query dimension (delegates to queries.py)."""
+        return query_responses(self._conn, filters, page=page, page_size=page_size)
 
 
 class _RunRepo:
@@ -477,29 +484,6 @@ def _row_to_question(r: sqlite3.Row) -> Question:
         approver_name=r["approver_name"],
         created_at=r["created_at"],
         updated_at=r["updated_at"],
-    )
-
-
-def _row_to_response(r: sqlite3.Row) -> Response:
-    return Response(
-        response_id=r["response_id"],
-        run_id=r["run_id"],
-        question_id=r["question_id"],
-        target_id=r["target_id"],
-        timestamp_utc=r["timestamp_utc"],
-        llm_name=r["llm_name"],
-        llm_model_version=r["llm_model_version"],
-        persona=Persona(r["persona"]),
-        therapeutic_area=r["therapeutic_area"],
-        brand_focus=r["brand_focus"],
-        domain=Domain(r["domain"]),
-        response_text=r["response_text"],
-        response_tokens=r["response_tokens"],
-        finish_reason=FinishReason(r["finish_reason"]),
-        status=ResponseStatus(r["status"]),
-        block_reason=r["block_reason"],
-        alert_triggered=bool(r["alert_triggered"]),
-        created_at=r["created_at"],
     )
 
 
