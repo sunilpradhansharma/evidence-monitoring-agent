@@ -13,10 +13,17 @@ bank; **code** makes the alerting decisions.
 - **Secrets are never logged.** Read of `.env` is denied by project settings.
 
 ## Stack
-- **Python**, managed with **uv**. **ruff** for format + lint, **pytest** for tests.
-- **SQLite** for the question repository / stored scores.
+- **Python 3.11+**, managed with **uv**. **ruff** for format + lint, **pytest** for tests,
+  **Pydantic** for models/validation.
+- **FastAPI** for the service layer.
+- **LangGraph** for orchestration — explicit, code-defined flow; **no autonomous agent loops**.
+- **Anthropic API (Claude)** is the orchestrator + scorer. **Amazon Bedrock** is the documented
+  production swap (config/implementation only).
+- **Monitored targets** via the **OpenAI** and **Google GenAI** SDKs, behind the `llm` seam.
+- **SQLite / DuckDB** behind a **`data_access`** interface for the question repo and stored scores.
 - Per-provider **LLM adapters** under `src/evidence_monitor/llm/adapters/` (see that folder's
   `CLAUDE.md` for adapter rules).
+- **Local-first: no AWS services are used in the POC.**
 - **Spec Kit** drives the spec → plan → tasks → implement workflow (`/speckit-*`).
 
 ## Commands
