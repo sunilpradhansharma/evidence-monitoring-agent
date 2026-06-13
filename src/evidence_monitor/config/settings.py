@@ -31,9 +31,7 @@ class Settings(BaseSettings):
 
     # --- Credentials (never logged; presence/reachability validated by the
     #     Foundational preflight, not here) ---
-    anthropic_api_key: SecretStr | None = Field(
-        default=None, validation_alias="ANTHROPIC_API_KEY"
-    )
+    anthropic_api_key: SecretStr | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
     openai_api_key: SecretStr | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     google_api_key: SecretStr | None = Field(default=None, validation_alias="GOOGLE_API_KEY")
     open_evidence_api_key: SecretStr | None = Field(
@@ -46,9 +44,7 @@ class Settings(BaseSettings):
     # --- Storage + scheduling ---
     db_path: str = Field(default="./data/evidence.db", validation_alias="EM_DB_PATH")
     schedule_cron: str = Field(default="0 2 * * *", validation_alias="EM_SCHEDULE_CRON")
-    max_tokens_per_run: int = Field(
-        default=2_000_000, validation_alias="EM_MAX_TOKENS_PER_RUN"
-    )
+    max_tokens_per_run: int = Field(default=2_000_000, validation_alias="EM_MAX_TOKENS_PER_RUN")
 
     # --- Targets config + outputs ---
     targets_config_path: str = Field(

@@ -1,0 +1,73 @@
+# LLM targets to monitor (Principle V — config-driven targets).
+#
+# Adding or removing a target is a config + adapter change only; core orchestration never changes.
+# Model ids, parameters, and rate limits live HERE, never in code. This file is content-agnostic:
+# it names PROVIDERS and personas only — no drug, competitor, or indication names appear anywhere.
+#
+# personas: which question-styles this target receives. An empty list (or all three) means the
+#   target is unconditional. Open Evidence is the only conditional target: PROVIDER-persona only,
+#   and active only when its API access is confirmed (FR-007).
+# prices: USD per 1,000 tokens, consumed by observability/cost.py for run-cost estimation.
+
+targets:
+  - target_id: openai-gpt4o
+    llm_name: openai-gpt4o
+    model_version: gpt-4o-2024-08-06
+    endpoint: null
+    temperature: 0.0
+    max_tokens: 1024
+    rpm_limit: 60
+    tpm_limit: 90000
+    personas: [PROSPECT, PROVIDER, PATIENT]
+    active: true
+    tos_acknowledged: true
+    prices:
+      input_per_1k: 0.0025
+      output_per_1k: 0.01
+
+  - target_id: google-gemini
+    llm_name: google-gemini
+    model_version: gemini-1.5-pro-002
+    endpoint: null
+    temperature: 0.0
+    max_tokens: 1024
+    rpm_limit: 60
+    tpm_limit: 90000
+    personas: [PROSPECT, PROVIDER, PATIENT]
+    active: true
+    tos_acknowledged: true
+    prices:
+      input_per_1k: 0.00125
+      output_per_1k: 0.005
+
+  - target_id: anthropic-claude-target
+    llm_name: anthropic-claude-target
+    model_version: claude-3-5-sonnet-20241022
+    endpoint: null
+    temperature: 0.0
+    max_tokens: 1024
+    rpm_limit: 50
+    tpm_limit: 80000
+    personas: [PROSPECT, PROVIDER, PATIENT]
+    active: true
+    tos_acknowledged: true
+    prices:
+      input_per_1k: 0.003
+      output_per_1k: 0.015
+
+  # Conditional: Provider-persona only, and only when API access is confirmed.
+  # Left inactive by default so its absence never counts against the capture rate.
+  - target_id: open-evidence
+    llm_name: open-evidence
+    model_version: open-evidence-v1
+    endpoint: null
+    temperature: 0.0
+    max_tokens: 1024
+    rpm_limit: 30
+    tpm_limit: 40000
+    personas: [PROVIDER]
+    active: false
+    tos_acknowledged: false
+    prices:
+      input_per_1k: 0.0
+      output_per_1k: 0.0

@@ -52,7 +52,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "W"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --cov=src/evidence_monitor --cov-report=term-missing"
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 
 [tool.coverage.run]
 source = ["src/evidence_monitor"]
