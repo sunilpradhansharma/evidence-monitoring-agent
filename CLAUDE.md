@@ -43,6 +43,8 @@ bank; **code** makes the alerting decisions.
 - POC spec: @specs/001-evidence-monitoring-poc/spec.md
 
 <!-- SPECKIT START -->
-For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan
+Active feature: **001-evidence-monitoring-poc**. For technologies, project structure, the
+production AWS mapping, and the Constitution Check, read the plan:
+@specs/001-evidence-monitoring-poc/plan.md
+(supporting: spec.md, research.md, data-model.md, contracts/, quickstart.md in the same dir).
 <!-- SPECKIT END -->

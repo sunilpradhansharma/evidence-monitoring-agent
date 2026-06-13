@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ScoringOutput",
+  "description": "Structured output the Claude scorer must return for each response. Validated before a ScoringRecord is written (Principles II & VII).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sentiment_score",
+    "competitive_position",
+    "citation_status",
+    "brand_mentions",
+    "key_claims",
+    "scoring_rationale"
+  ],
+  "properties": {
+    "sentiment_score": {
+      "type": "number",
+      "minimum": -1.0,
+      "maximum": 1.0,
+      "description": "-1.0 strongly negative toward our therapy .. +1.0 strongly positive; 0.0 neutral."
+    },
+    "competitive_position": {
+      "type": "string",
+      "enum": [
+        "FIRST_LINE_RECOMMENDED",
+        "AMONG_OPTIONS",
+        "SECOND_LINE",
+        "NOT_RECOMMENDED",
+        "NOT_MENTIONED"
+      ]
+    },
+    "citation_status": {
+      "type": "string",
+      "enum": ["CITED", "PARTIAL", "ABSENT", "WRONG_INDICATION"],
+      "description": "WRONG_INDICATION = the model returned content for the wrong disease/indication."
+    },
+    "brand_mentions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Brand/competitor names detected in the response text."
+    },
+    "key_claims": {
+      "type": "array",
+      "items": { "type": "string" },
+      "maxItems": 5,
+      "description": "Up to five key claims the model made about the therapy."
+    },
+    "scoring_rationale": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Brief explanation of the score."
+    }
+  }
+}
