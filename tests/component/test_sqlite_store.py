@@ -68,6 +68,13 @@ def test_scoring_add_version_increments_and_retains(store):
     assert store.scores.latest_for("RESP-1").version == 2
 
 
+def test_scoring_persists_competitor_sentiments(store):
+    store.responses.insert(sample_response())
+    record = sample_scoring().model_copy(update={"competitor_sentiments": {"rival": 0.7}})
+    store.scores.add_version(record)
+    assert store.scores.latest_for("RESP-1").competitor_sentiments == {"rival": 0.7}
+
+
 def test_alert_list_orders_by_severity(store):
     store.responses.insert(sample_response())
     score = store.scores.add_version(sample_scoring())

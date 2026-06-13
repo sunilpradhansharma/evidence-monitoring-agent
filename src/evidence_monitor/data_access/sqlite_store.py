@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS scoring_records (
     competitive_position TEXT NOT NULL,
     citation_status     TEXT NOT NULL,
     brand_mentions      TEXT NOT NULL,
+    competitor_sentiments TEXT NOT NULL,
     key_claims          TEXT NOT NULL,
     scoring_rationale   TEXT NOT NULL,
     scorer_model        TEXT NOT NULL,
@@ -397,9 +398,9 @@ class _ScoringRepo:
             """
             INSERT INTO scoring_records
                 (score_id, response_id, version, sentiment_score, competitive_position,
-                 citation_status, brand_mentions, key_claims, scoring_rationale, scorer_model,
-                 is_human_override, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 citation_status, brand_mentions, competitor_sentiments, key_claims,
+                 scoring_rationale, scorer_model, is_human_override, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 stored.score_id,
@@ -409,6 +410,7 @@ class _ScoringRepo:
                 str(stored.competitive_position),
                 str(stored.citation_status),
                 json.dumps(stored.brand_mentions),
+                json.dumps(stored.competitor_sentiments),
                 json.dumps(stored.key_claims),
                 stored.scoring_rationale,
                 stored.scorer_model,
@@ -511,6 +513,7 @@ def _row_to_scoring(r: sqlite3.Row) -> ScoringRecord:
         competitive_position=CompetitivePosition(r["competitive_position"]),
         citation_status=CitationStatus(r["citation_status"]),
         brand_mentions=json.loads(r["brand_mentions"]),
+        competitor_sentiments=json.loads(r["competitor_sentiments"]),
         key_claims=json.loads(r["key_claims"]),
         scoring_rationale=r["scoring_rationale"],
         scorer_model=r["scorer_model"],

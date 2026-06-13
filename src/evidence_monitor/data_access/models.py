@@ -199,6 +199,10 @@ class ScoringRecord(BaseModel):
     competitive_position: CompetitivePosition
     citation_status: CitationStatus
     brand_mentions: list[str] = Field(default_factory=list)
+    # Sentiment toward each detected COMPETITOR brand (brand → −1.0..+1.0). Distinct from
+    # ``sentiment_score`` (toward OUR therapy); the deterministic COMPETITOR_HIGHER rule compares
+    # the two. Empty when no competitor is detected. Brand names are opaque data (Principle IV).
+    competitor_sentiments: dict[str, float] = Field(default_factory=dict)
     key_claims: list[str] = Field(default_factory=list)
     scoring_rationale: str = Field(min_length=1)
     scorer_model: str
@@ -210,6 +214,13 @@ class ScoringRecord(BaseModel):
     def _at_most_five_claims(cls, v: list[str]) -> list[str]:
         if len(v) > 5:
             raise ValueError("key_claims may contain at most 5 items")
+        return v
+
+    @field_validator("competitor_sentiments")
+    @classmethod
+    def _competitor_sentiments_in_range(cls, v: dict[str, float]) -> dict[str, float]:
+        if any(not -1.0 <= score <= 1.0 for score in v.values()):
+            raise ValueError("each competitor sentiment must be within -1.0..1.0")
         return v
 
 

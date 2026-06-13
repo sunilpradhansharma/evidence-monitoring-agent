@@ -134,6 +134,13 @@ def test_query_filters_each_dimension(svc, store):
     assert svc.query(QueryFilters()).total == 8
 
 
+def test_query_filters_by_run_id(svc):
+    svc.record(_resp("a", run_id="RUN-A"))
+    svc.record(_resp("b", run_id="RUN-B"))
+    assert _ids(svc.query(QueryFilters(run_id="RUN-A"))) == {"a"}
+    assert _ids(svc.query(QueryFilters(run_id="RUN-B"))) == {"b"}
+
+
 def test_query_filters_date_range(svc):
     old = datetime(2020, 1, 1, tzinfo=UTC)
     new = datetime(2025, 6, 1, tzinfo=UTC)

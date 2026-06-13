@@ -64,6 +64,9 @@ class ScoringOutput(BaseModel):
     competitive_position: CompetitivePosition
     citation_status: CitationStatus
     brand_mentions: list[str] = Field(default_factory=list)
+    # Sentiment toward each detected competitor brand (brand → −1.0..+1.0). Lets code compare a
+    # competitor against our therapy for the COMPETITOR_HIGHER rule. Empty when none detected.
+    competitor_sentiments: dict[str, float] = Field(default_factory=dict)
     key_claims: list[str] = Field(default_factory=list)
     scoring_rationale: str = Field(min_length=1)
 
@@ -72,6 +75,13 @@ class ScoringOutput(BaseModel):
     def _at_most_five_claims(cls, v: list[str]) -> list[str]:
         if len(v) > 5:
             raise ValueError("key_claims may contain at most 5 items")
+        return v
+
+    @field_validator("competitor_sentiments")
+    @classmethod
+    def _competitor_sentiments_in_range(cls, v: dict[str, float]) -> dict[str, float]:
+        if any(not -1.0 <= score <= 1.0 for score in v.values()):
+            raise ValueError("each competitor sentiment must be within -1.0..1.0")
         return v
 
 
@@ -201,6 +211,7 @@ class ClaudeClient:
             competitive_position=CompetitivePosition.NOT_MENTIONED,
             citation_status=CitationStatus.ABSENT,
             brand_mentions=[],
+            competitor_sentiments={},
             key_claims=["[mock] generic claim"],
             scoring_rationale="[mock] deterministic score (offline mode)",
         )

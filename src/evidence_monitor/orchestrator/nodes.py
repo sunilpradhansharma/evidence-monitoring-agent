@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 
 from evidence_monitor.alerts import rules
 from evidence_monitor.alerts.rules import AlertThresholds
-from evidence_monitor.data_access.interface import RunTotals
+from evidence_monitor.data_access.interface import QueryFilters, RunTotals
 from evidence_monitor.data_access.models import (
     Alert,
     AuditEvent,
@@ -169,12 +169,19 @@ def build_nodes(ctx: OrchestratorContext) -> dict[str, Callable]:
         }
 
     def score_batch(state: RunState) -> dict:
-        """Score each capturable response into a separate, versioned scoring record (US2)."""
+        """Score every capturable, not-yet-scored response FOR THIS RUN (US2).
+
+        Querying by run id (not just this invocation's responses) means a resumed run also scores
+        responses captured before the interruption; the not-yet-scored guard keeps it idempotent.
+        """
         new_scores = []
         tokens = 0
-        for response in state.responses:
+        run_responses = ctx.responses.query(QueryFilters(run_id=state.run_id), page_size=None).items
+        for response in run_responses:
             if response.status not in _SCORABLE:
                 continue
+            if ctx.store.scores.latest_for(response.response_id) is not None:
+                continue  # already scored — idempotent, and covers resume
             scored = ctx.scorer.score(response)
             stored = ctx.store.scores.add_version(scored.record)
             new_scores.append(stored)
@@ -185,7 +192,12 @@ def build_nodes(ctx: OrchestratorContext) -> dict[str, Callable]:
         """Apply deterministic threshold rules; raise an alert per fired rule (US4)."""
         new_alerts = []
         for score in state.scores:
-            for fired in rules.evaluate(score, thresholds=ctx.thresholds):
+            fired_rules = rules.evaluate(
+                score,
+                thresholds=ctx.thresholds,
+                competitor_sentiments=score.competitor_sentiments,
+            )
+            for fired in fired_rules:
                 alert = Alert.for_rule(
                     score_id=score.score_id,
                     response_id=score.response_id,

@@ -66,6 +66,8 @@ def _where(filters: QueryFilters) -> tuple[str, list[object]]:
         clauses.append(clause)
         params.append(value)
 
+    if filters.run_id is not None:
+        add("responses.run_id = ?", filters.run_id)
     if filters.llm is not None:
         add("responses.llm_name = ?", filters.llm)
     if filters.persona is not None:

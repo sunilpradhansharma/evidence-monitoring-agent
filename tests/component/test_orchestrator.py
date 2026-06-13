@@ -17,14 +17,22 @@ import pytest
 from tests.fixtures import sample_questions
 
 from evidence_monitor.data_access.interface import QueryFilters
-from evidence_monitor.data_access.models import ApprovalStatus, AuditEventType, TriggerType
+from evidence_monitor.data_access.models import (
+    AlertRule,
+    ApprovalStatus,
+    AuditEventType,
+    CitationStatus,
+    CompetitivePosition,
+    ScoringRecord,
+    TriggerType,
+)
 from evidence_monitor.data_access.sqlite_store import SqliteStore
 from evidence_monitor.llm.client import ClaudeClient
 from evidence_monitor.llm.registry import build_adapter, load_targets, targets_for_persona
 from evidence_monitor.orchestrator import OrchestratorContext, RunManager, run
 from evidence_monitor.response_repo.repository import ResponseService
 from evidence_monitor.response_repo.schema import Response
-from evidence_monitor.scoring.scorer import Scorer
+from evidence_monitor.scoring.scorer import Scored, Scorer
 
 # repo-root/src/evidence_monitor/config/targets.yaml (tests/component/<file> → parents[2] == root)
 TARGETS_CFG = Path(__file__).resolve().parents[2] / "src/evidence_monitor/config/targets.yaml"
@@ -196,3 +204,45 @@ def test_resume_skips_completed_questions_without_duplicates(store, targets):
     assert per_question[done_qid] == 3
     assert all(count == 3 for count in per_question.values())
     assert sum(per_question.values()) == 9
+
+    # Resume scores the WHOLE run, including the responses captured before the interruption.
+    assert len(final.scores) == 9
+    run_responses = ResponseService(store.responses).query(
+        QueryFilters(run_id=interrupted.run_id), page_size=None
+    ).items
+    assert all(store.scores.latest_for(r.response_id) is not None for r in run_responses)
+
+
+class _CompetitorScorer:
+    """Stub scorer that reports a competitor far more positive than our therapy (gap-2 wiring)."""
+
+    def score(self, response: Response) -> Scored:
+        record = ScoringRecord(
+            response_id=response.response_id,
+            sentiment_score=0.0,
+            competitive_position=CompetitivePosition.AMONG_OPTIONS,
+            citation_status=CitationStatus.CITED,
+            brand_mentions=["rival"],
+            competitor_sentiments={"rival": 0.9},  # 0.9 vs our 0.0 → exceeds the 0.3 margin
+            key_claims=[],
+            scoring_rationale="stub",
+            scorer_model="stub-model",
+        )
+        return Scored(record=record, tokens=1)
+
+
+def test_competitor_higher_alert_fires_through_the_pipeline(store, targets):
+    # Closes the COMPETITOR_HIGHER gap: per-competitor sentiment now flows score → rule → alert.
+    _seed_approved_questions(store)
+    ctx = OrchestratorContext(
+        store=store,
+        targets=targets,
+        scorer=_CompetitorScorer(),
+        run_manager=RunManager(store.runs),
+    )
+
+    final = run(ctx)
+
+    assert final.alerts, "expected COMPETITOR_HIGHER alerts to fire"
+    assert {a.rule_fired for a in final.alerts} == {AlertRule.COMPETITOR_HIGHER}
+    assert final.summary.alert_count == len(final.alerts)

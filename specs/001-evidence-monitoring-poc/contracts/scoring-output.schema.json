@@ -39,6 +39,11 @@
       "items": { "type": "string" },
       "description": "Brand/competitor names detected in the response text."
     },
+    "competitor_sentiments": {
+      "type": "object",
+      "additionalProperties": { "type": "number", "minimum": -1.0, "maximum": 1.0 },
+      "description": "Sentiment toward each detected competitor brand (brand -> -1.0..+1.0). Enables the deterministic COMPETITOR_HIGHER alert rule; empty when no competitor is detected."
+    },
     "key_claims": {
       "type": "array",
       "items": { "type": "string" },

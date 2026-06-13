@@ -24,7 +24,8 @@ from evidence_monitor.response_repo.schema import Response
 _DEFAULT_SYSTEM_PROMPT = (
     "You assess one public LLM response about a therapy versus its competitors. Return a "
     "structured score: sentiment toward our therapy on a -1..+1 scale, the competitive position, "
-    "the citation status, the brands you detected, up to five key claims, and a short rationale."
+    "the citation status, the brands you detected, the sentiment toward each detected competitor "
+    "brand on the same -1..+1 scale, up to five key claims, and a short rationale."
 )
 
 
@@ -55,6 +56,7 @@ class Scorer:
             competitive_position=out.competitive_position,
             citation_status=out.citation_status,
             brand_mentions=out.brand_mentions,
+            competitor_sentiments=out.competitor_sentiments,
             key_claims=out.key_claims,
             scoring_rationale=out.scoring_rationale,
             scorer_model=result.model_version,

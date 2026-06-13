@@ -58,8 +58,12 @@ class QueryFilters:
 
     Every field is optional; an unset field does not constrain the query.
     Exports (CSV/JSON) consume this same object so a view and its export match.
+
+    ``run_id`` is an orchestration/run-scoping dimension (beyond the user-facing FR-012 set) used
+    to gather a single run's responses — e.g. to score everything a resumed run captured.
     """
 
+    run_id: str | None = None
     llm: str | None = None
     persona: Persona | None = None
     therapeutic_area: str | None = None
