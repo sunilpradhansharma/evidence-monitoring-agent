@@ -11,6 +11,15 @@ bank of approved questions to several public LLMs, captures every response as a 
 record, scores each response for brand sentiment and competitive positioning, flags concerning
 responses, and presents the findings on a simple dashboard for Medical Affairs and Commercial."
 
+## Clarifications
+
+### Session 2026-06-13
+
+- Q: What sentiment delta triggers the "competitor has materially higher sentiment" alert? → A: ≥0.3 on the −1.0..+1.0 scale (configurable).
+- Q: Is automated run-over-run change detection in POC scope? → A: Deferred — responses are stored to enable it later, but no automated change-flagging is built in the POC.
+- Q: How many submissions per approved question per target per run? → A: Single submission (~300 calls for 100 questions × 3 targets).
+- Q: What retention period applies to captured responses? → A: At least 24 months; records are soft-deleted, never physically purged in the POC.
+
 ## User Scenarios & Testing *(mandatory)*
 
 The system serves **Medical Affairs** and **Commercial** stakeholders who need to know what
@@ -138,7 +147,7 @@ WRONG_INDICATION citation status produces the highest-severity alert.
    alert rules are evaluated, **Then** an alert is raised citing the rule that fired.
 2. **Given** a scoring record with `competitive_position` = NOT_RECOMMENDED, **When** evaluated,
    **Then** an alert is raised.
-3. **Given** a response where a competitor brand is detected with materially higher sentiment
+3. **Given** a response where a competitor brand is detected with sentiment at least 0.3 higher
    than our therapy in the same response, **When** evaluated, **Then** an alert is raised.
 4. **Given** a scoring record with `citation_status` = WRONG_INDICATION, **When** evaluated,
    **Then** a highest-severity alert is raised (a person routed to wrong-disease content).
@@ -218,7 +227,8 @@ the alert list, export the records to CSV and JSON, and view the run summary.
 **Automated capture & storage (US1)**
 
 - **FR-006**: The system MUST execute scheduled, unattended runs that, for each APPROVED question,
-  submit to every configured target and store every response before advancing.
+  submit to every configured target and store every response before advancing. Each approved
+  question is submitted once per target per run (single submission).
 - **FR-007**: Every configured public LLM target (OpenAI GPT-4o, Google Gemini, Anthropic Claude
   queried as an end-user) MUST receive every approved question; Open Evidence MUST be submitted
   ONLY for Provider-persona questions and ONLY when its API access is confirmed.
@@ -257,8 +267,8 @@ the alert list, export the records to CSV and JSON, and view the run summary.
   model) and MUST be reproducible for identical inputs.
 - **FR-020**: The system MUST raise an alert when any of: `sentiment_score` is below the negative
   threshold; `competitive_position` is NOT_RECOMMENDED; a competitor brand is detected with
-  materially higher sentiment than our therapy in the same response; or `citation_status` is
-  WRONG_INDICATION.
+  sentiment at least 0.3 higher than our therapy (on the −1.0..+1.0 scale, configurable) in the
+  same response; or `citation_status` is WRONG_INDICATION.
 - **FR-021**: A WRONG_INDICATION citation status MUST raise the highest-severity alert.
 - **FR-022**: Each alert MUST record which rule fired and the reason, linked to the scoring record
   and response.
@@ -280,6 +290,9 @@ the alert list, export the records to CSV and JSON, and view the run summary.
   seeded with real patient data.
 - **FR-028**: Captured responses MUST be stored only in controlled local storage and MUST NOT be
   forwarded to third parties; the system MUST comply with each target's terms of service.
+- **FR-029**: Captured responses MUST be retained for at least 24 months to support longitudinal
+  analysis; records MUST be soft-deleted (marked inactive with a reason) and never physically
+  purged in the POC.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -327,8 +340,13 @@ the alert list, export the records to CSV and JSON, and view the run summary.
   every configured target (except the Open Evidence conditional, which is Provider-only).
 - **Open Evidence** is deferred unless API access is confirmed before it is needed; its absence does
   not count against the ≥95% capture target.
-- **"Materially higher" competitor sentiment** uses a configurable margin (default: competitor
-  sentiment exceeds our therapy's by a fixed delta) so the rule is deterministic and tunable.
+- **"Materially higher" competitor sentiment** uses a configurable margin with a default of ≥0.3
+  (competitor sentiment exceeds our therapy's by at least 0.3 on the −1.0..+1.0 scale), so the
+  rule is deterministic and tunable.
+- **Single submission per question/target/run**: each approved question is sent once per target
+  per run (no repeated sampling); ~100 questions × 3 targets ≈ 300 calls per run.
+- **Retention**: captured responses are retained for at least 24 months via soft-delete; nothing
+  is physically purged during the POC.
 - **Negative-sentiment and other alert thresholds** are configurable values, externalized from code.
 - **Daily schedule** runs unattended at a configured time; ad-hoc/on-demand runs are also supported.
 - **Storage and operation are local-first**; no cloud/managed services are required for the POC.
@@ -343,6 +361,9 @@ the alert list, export the records to CSV and JSON, and view the run summary.
 - Full clinical-accuracy scoring against a Medical Affairs reference library.
 - User authentication, role-based access control, or multi-tenant support.
 - Mobile or native applications.
+- Automated run-over-run change detection / change-flagging. Responses are stored longitudinally
+  (with timestamps) so this can be built later, but the POC raises no automated alerts on changes
+  in an LLM's answer between runs.
 
 ## Future Capabilities *(recorded for direction only — NOT POC scope)*
 
