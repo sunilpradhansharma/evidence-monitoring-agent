@@ -6,7 +6,8 @@ Runnable validation scenarios proving the feature works end-to-end. Detailed sha
 
 ## Prerequisites
 - Python 3.11+ and `uv`.
-- Install deps: `uv sync`.
+- Install deps: `uv sync` — installs runtime deps **and** the default `dev` dependency group
+  (pytest, ruff), so `uv run pytest` / `uv run ruff` need no `--extra` flag.
 - For live runs only: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY` in `.env`
   (`OPEN_EVIDENCE_API_KEY` only if that conditional target is enabled).
 - All validation below runs **offline** via `--mock` — no keys or network needed.

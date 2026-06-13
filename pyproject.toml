@@ -21,7 +21,10 @@ dependencies = [
     "duckdb>=1.0",
 ]
 
-[project.optional-dependencies]
+# Dev tooling lives in a uv dependency group (PEP 735), which `uv sync` installs BY DEFAULT —
+# so `uv sync` followed by `uv run pytest` / `uv run ruff` works with no extra flags. (Under
+# `[project.optional-dependencies]` these would require `uv sync --extra dev`, a common footgun.)
+[dependency-groups]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",

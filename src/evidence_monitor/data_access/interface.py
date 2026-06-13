@@ -92,6 +92,13 @@ class QuestionRepository(Protocol):
         """Insert a question or record a new version on edit; never hard-delete."""
         ...
 
+    def get(self, question_id: str) -> Question | None:
+        """The latest version of one question, or ``None`` if unknown.
+
+        Read-by-id underpins idempotent import (upsert-by-``question_id``) and editing.
+        """
+        ...
+
     def set_approval(
         self,
         question_id: str,

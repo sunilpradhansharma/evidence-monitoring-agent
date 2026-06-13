@@ -131,14 +131,14 @@ PENDING→APPROVED→REJECTED; only APPROVED questions are submitted.
 **Independent Test**: Create/edit/approve/reject questions; confirm runs submit only APPROVED, and
 edits create new versions with history retained.
 
-- [ ] T056 [US3] Implement question CRUD + versioning (no hard delete) in `src/evidence_monitor/question_repo/repository.py`
-- [ ] T057 [P] [US3] Component test for question versioning + soft-delete in `tests/component/test_question_versioning.py`
-- [ ] T058 [US3] Implement the approval state machine (PENDING/APPROVED/REJECTED, approver recorded) in `src/evidence_monitor/question_repo/approval.py`
-- [ ] T059 [P] [US3] Component test asserting only APPROVED+active questions are run-eligible in `tests/component/test_approval_gate.py`
-- [ ] T060 [US3] Implement the CSV/Excel importer (idempotent upsert by question_id, imports as PENDING) in `src/evidence_monitor/question_repo/importer.py`
-- [ ] T061 [P] [US3] Component test for idempotent import (no duplicates) in `tests/component/test_importer.py`
-- [ ] T062 [US3] Implement the read-write Approvals endpoints in `src/evidence_monitor/api.py` per contracts/rest-api.md
-- [ ] T063 [P] [US3] Component test for the Approvals API (approve/reject/edit) in `tests/component/test_approvals_api.py`
+- [X] T056 [US3] Implement question CRUD + versioning (no hard delete) in `src/evidence_monitor/question_repo/repository.py`
+- [X] T057 [P] [US3] Component test for question versioning + soft-delete in `tests/component/test_question_versioning.py`
+- [X] T058 [US3] Implement the approval state machine (PENDING/APPROVED/REJECTED, approver recorded) in `src/evidence_monitor/question_repo/approval.py`
+- [X] T059 [P] [US3] Component test asserting only APPROVED+active questions are run-eligible in `tests/component/test_approval_gate.py`
+- [X] T060 [US3] Implement the CSV/Excel importer (idempotent upsert by question_id, imports as PENDING) in `src/evidence_monitor/question_repo/importer.py`
+- [X] T061 [P] [US3] Component test for idempotent import (no duplicates) in `tests/component/test_importer.py`
+- [X] T062 [US3] Implement the read-write Approvals endpoints in `src/evidence_monitor/api.py` per contracts/rest-api.md
+- [X] T063 [P] [US3] Component test for the Approvals API (approve/reject/edit) in `tests/component/test_approvals_api.py`
 
 **Checkpoint**: Curation + approval gate enforced end to end.
 

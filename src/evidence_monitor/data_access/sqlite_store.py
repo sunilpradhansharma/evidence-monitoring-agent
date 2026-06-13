@@ -213,6 +213,10 @@ class _QuestionRepo:
         self._insert_version(updated, deactivated_reason=reason)
         return updated
 
+    def get(self, question_id: str) -> Question | None:
+        """The latest version of one question (public read-by-id)."""
+        return self._latest(question_id)
+
     def _latest(self, question_id: str) -> Question | None:
         row = self._conn.execute(
             """
@@ -554,7 +558,10 @@ class SqliteStore:
     """
 
     def __init__(self, db_path: str = ":memory:") -> None:
-        self._conn = sqlite3.connect(db_path)
+        # ``check_same_thread=False`` lets the FastAPI app (whose sync routes run in a worker
+        # threadpool) share this connection. Access is sequential in the POC and SQLite serializes
+        # statements, so this is safe; production swaps to Aurora/DynamoDB behind the seam anyway.
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(_SCHEMA)

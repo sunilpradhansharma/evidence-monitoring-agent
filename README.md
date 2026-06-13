@@ -204,6 +204,9 @@ uv run evidence-monitor run --mock          # full capture → score → alert �
 uv run pytest -q                            # unit + component + e2e
 ```
 
+> `uv sync` installs the runtime deps **and** the dev tooling (pytest, ruff): they live in the
+> default `dev` dependency group, so `uv run pytest` / `uv run ruff` work with no `--extra` flag.
+
 **Live:** put `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY` (and optional
 `OPEN_EVIDENCE_API_KEY`) in `.env`, approve questions in the Approvals UI, then:
 ```bash
