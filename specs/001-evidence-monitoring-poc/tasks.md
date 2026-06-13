@@ -197,6 +197,7 @@ export CSV/JSON, and fetch the run summary.
 - [ ] T085 Execute `specs/001-evidence-monitoring-poc/quickstart.md` end to end and confirm all scenarios pass
 - [ ] T086 [P] Implement response soft-delete + ≥24-month retention (mark inactive with reason + timestamp; never physically purge) in `src/evidence_monitor/data_access/sqlite_store.py` (FR-029)
 - [ ] T087 [P] Component test for response retention/soft-delete (no physical purge; record stays queryable as inactive) in `tests/component/test_retention.py` (FR-029)
+- [ ] T088 [P] Performance proxy test: assert the orchestrator dispatches across targets concurrently and honors per-target rate limits (validates FR-030 cadence; full 4h-run / 30-min-scoring timing is validated operationally at the readout) in `tests/e2e/test_performance_proxy.py` (FR-030)
 
 ---
 
@@ -258,4 +259,4 @@ scoring) and US5 (dashboard) as data becomes available.
 - Alert rules (T064) are deliberately code-only and separate from the Claude scorer (T050) —
   Principle VIII (LLM scores, code decides).
 - Commit after each task or logical group; stop at any checkpoint to validate a story.
-- Total: 87 tasks (T001–T087). Retention (T086/T087) added for FR-029; SC-004 minimums folded into T019/T020.
+- Total: 88 tasks (T001–T088). Retention (T086/T087) added for FR-029; performance proxy (T088) for FR-030; SC-004 minimums folded into T019/T020.

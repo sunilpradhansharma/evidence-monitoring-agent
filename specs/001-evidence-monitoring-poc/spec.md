@@ -236,8 +236,9 @@ the alert list, export the records to CSV and JSON, and view the run summary.
   response text and complete metadata (run, question, target, timestamp, model version, persona,
   therapeutic area, brand focus, domain, token counts, finish reason).
 - **FR-009**: Each response record MUST carry a status of SUCCESS, FAILED, TRUNCATED, or BLOCKED.
-- **FR-010**: On target failure, the system MUST retry with exponential backoff up to a configured
-  budget; after exhaustion it MUST mark the record FAILED and continue the run.
+- **FR-010**: On target failure, the system MUST retry transient failures with exponential backoff
+  up to a configured budget (default: 3 attempts with 2s / 4s / 8s backoff); after the budget is
+  exhausted it MUST mark the record FAILED and continue the run.
 - **FR-011**: A run MUST be resumable from the last completed question without re-submitting
   already-completed questions.
 - **FR-012**: The Response store MUST be queryable by any combination of LLM, persona, therapeutic
@@ -266,9 +267,9 @@ the alert list, export the records to CSV and JSON, and view the run summary.
 - **FR-019**: Alert decisions MUST be made by deterministic threshold rules in code (not by the
   model) and MUST be reproducible for identical inputs.
 - **FR-020**: The system MUST raise an alert when any of: `sentiment_score` is below the negative
-  threshold; `competitive_position` is NOT_RECOMMENDED; a competitor brand is detected with
-  sentiment at least 0.3 higher than our therapy (on the −1.0..+1.0 scale, configurable) in the
-  same response; or `citation_status` is WRONG_INDICATION.
+  sentiment threshold (default −0.3, configurable); `competitive_position` is NOT_RECOMMENDED; a
+  competitor brand is detected with sentiment at least 0.3 higher than our therapy (on the
+  −1.0..+1.0 scale, configurable) in the same response; or `citation_status` is WRONG_INDICATION.
 - **FR-021**: A WRONG_INDICATION citation status MUST raise the highest-severity alert.
 - **FR-022**: Each alert MUST record which rule fired and the reason, linked to the scoring record
   and response.
@@ -293,6 +294,15 @@ the alert list, export the records to CSV and JSON, and view the run summary.
 - **FR-029**: Captured responses MUST be retained for at least 24 months to support longitudinal
   analysis; records MUST be soft-deleted (marked inactive with a reason) and never physically
   purged in the POC.
+- **FR-030**: A full run of ~100 questions across 3 targets (~300 calls) MUST complete within 4
+  hours at the rate-limited cadence, and the scoring pass MUST complete within 30 minutes of the
+  capture run finishing for the same question set.
+- **FR-031**: All application events (run start/stop, question dispatch, response received, error,
+  retry, alert) MUST be written as structured logs with timestamp, severity, and context fields;
+  the logging layer MUST redact secret-shaped strings so that credentials are never logged.
+- **FR-032**: Before any question is submitted, the system MUST validate that all required
+  credentials are present and reachable; if any required credential is missing or unreachable, it
+  MUST exit with a clear, non-secret error and submit nothing.
 
 ### Key Entities *(include if feature involves data)*
 
