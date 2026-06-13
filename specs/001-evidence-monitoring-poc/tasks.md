@@ -51,8 +51,8 @@ store, Pydantic schemas, audit log, and the no-PII seed generator come first.)
 - [ ] T016 [P] Unit test for settings load + preflight exits clearly on missing/unreachable creds in `tests/unit/test_settings.py`
 - [ ] T017 Implement structured JSON logging + secret redaction in `src/evidence_monitor/observability/logging.py`
 - [ ] T018 [P] Unit test asserting secrets are redacted and never logged in `tests/unit/test_logging_redaction.py`
-- [ ] T019 Implement the generic, **no-PII** seed question generator in `src/evidence_monitor/question_repo/seed.py` (produces persona-tagged generic questions for tests/demo)
-- [ ] T020 [P] Unit test asserting seeded questions contain no PII/PHI and cover all personas in `tests/unit/test_seed_no_pii.py`
+- [ ] T019 Implement the generic, **no-PII** seed question generator in `src/evidence_monitor/question_repo/seed.py` (produces persona-tagged generic questions covering **≥30 per persona across ≥2 therapeutic areas** per SC-004, for tests/demo)
+- [ ] T020 [P] Unit test asserting seeded questions contain no PII/PHI, cover all personas, and meet the **SC-004 minimums (≥30 questions/persona across ≥2 therapeutic areas)** in `tests/unit/test_seed_no_pii.py`
 
 **Checkpoint**: Foundation ready — user stories can begin.
 
@@ -112,7 +112,7 @@ ScoringRecord validating against `contracts/scoring-output.schema.json`; re-scor
 and leaves the response unchanged.
 
 - [ ] T049 [US2] Author the MA-reviewed scoring prompt in `src/evidence_monitor/scoring/prompts.py`
-- [ ] T050 [US2] Implement the scorer with structured JSON output (validated vs the scoring schema) in `src/evidence_monitor/scoring/scorer.py`
+- [ ] T050 [US2] Implement the scorer with structured JSON output (validated vs the scoring schema) in `src/evidence_monitor/scoring/scorer.py` — routes through the config-sourced Claude client in `src/evidence_monitor/llm/client.py` (model id from config, Principle V)
 - [ ] T051 [P] [US2] Unit test asserting scorer output conforms to `contracts/scoring-output.schema.json` in `tests/unit/test_scorer_schema.py`
 - [ ] T052 [US2] Implement `ScoringRepository` (add_version / latest_for / versions_for) in `src/evidence_monitor/data_access/sqlite_store.py`
 - [ ] T053 [P] [US2] Component test for scoring versioning + response-immutability preserved in `tests/component/test_scoring_versioning.py`
@@ -195,6 +195,8 @@ export CSV/JSON, and fetch the run summary.
 - [ ] T083 [P] Write `README.md` at the repo root: setup, env vars, adding a target, importing questions (NF-011)
 - [ ] T084 Final `uv run ruff format .` + `uv run ruff check --fix .` clean pass
 - [ ] T085 Execute `specs/001-evidence-monitoring-poc/quickstart.md` end to end and confirm all scenarios pass
+- [ ] T086 [P] Implement response soft-delete + ≥24-month retention (mark inactive with reason + timestamp; never physically purge) in `src/evidence_monitor/data_access/sqlite_store.py` (FR-029)
+- [ ] T087 [P] Component test for response retention/soft-delete (no physical purge; record stays queryable as inactive) in `tests/component/test_retention.py` (FR-029)
 
 ---
 
@@ -256,4 +258,4 @@ scoring) and US5 (dashboard) as data becomes available.
 - Alert rules (T064) are deliberately code-only and separate from the Claude scorer (T050) —
   Principle VIII (LLM scores, code decides).
 - Commit after each task or logical group; stop at any checkpoint to validate a story.
-- Total: 85 tasks (T001–T085).
+- Total: 87 tasks (T001–T087). Retention (T086/T087) added for FR-029; SC-004 minimums folded into T019/T020.
