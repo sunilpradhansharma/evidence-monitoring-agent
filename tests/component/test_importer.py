@@ -1,8 +1,9 @@
-"""Component tests for the CSV importer against the real seed question bank (US3, T061).
+"""Component tests for the importer against the real seed question bank (US3, T061).
 
 Exercises the importer end-to-end over ``data/question_bank.csv``: import as PENDING, the
 per-persona / per-therapeutic-area tally (SC-004 minimums), and — critically — that a second
-import of the same file creates no duplicates and no new versions.
+import of the same file creates no duplicates and no new versions. A final round-trip test
+covers the Excel (``.xlsx``) read path with generic, content-agnostic rows.
 """
 
 from __future__ import annotations
@@ -78,3 +79,80 @@ def test_dry_run_writes_nothing(store):
     assert report.dry_run is True
     assert report.created == report.processed
     assert _question_row_count(store) == 0  # nothing persisted
+
+
+# --------------------------------------------------------------------------- #
+# Excel (.xlsx) round-trip — generic, content-agnostic rows (no PII, no real brands)
+# --------------------------------------------------------------------------- #
+_XLSX_HEADER = [
+    "question_id",
+    "persona",
+    "therapeutic_area",
+    "brand_focus",
+    "domain",
+    "active",
+    "question_text",
+]
+_XLSX_ROWS = [
+    [
+        "XL-PROS-1",
+        "Prospect",
+        "Area-One",
+        "Brand-X",
+        "Efficacy",
+        "true",
+        "A generic prospect question?",
+    ],
+    [
+        "XL-PROV-1",
+        "Provider",
+        "Area-One",
+        "Brand-X",
+        "Safety",
+        "true",
+        "A generic provider question?",
+    ],
+    ["XL-PAT-1", "Patient", "Area-Two", "Brand-Y", "Access", "true", "A generic patient question?"],
+]
+
+
+def _write_xlsx(path: Path) -> Path:
+    openpyxl = pytest.importorskip("openpyxl")
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.append(_XLSX_HEADER)
+    for row in _XLSX_ROWS:
+        sheet.append(row)
+    workbook.save(path)
+    return path
+
+
+def test_excel_round_trip_imports_as_pending(store, tmp_path):
+    xlsx = _write_xlsx(tmp_path / "bank.xlsx")
+
+    report = import_questions(store.questions, xlsx)
+
+    assert report.created == len(_XLSX_ROWS)
+    assert report.skipped == 0
+    assert report.dry_run is False
+    # Every imported question is PENDING, with the dimensions read back from the sheet.
+    pending = store.questions.list(approval_status=ApprovalStatus.PENDING)
+    assert {q.question_id for q in pending} == {"XL-PROS-1", "XL-PROV-1", "XL-PAT-1"}
+    assert report.by_persona == {"PATIENT": 1, "PROSPECT": 1, "PROVIDER": 1}
+    assert report.by_therapeutic_area == {"Area-One": 2, "Area-Two": 1}
+    prospect = store.questions.get("XL-PROS-1")
+    assert prospect.persona is Persona.PROSPECT
+    assert prospect.brand_focus == "Brand-X"
+    assert prospect.active is True
+
+
+def test_excel_reimport_is_idempotent(store, tmp_path):
+    xlsx = _write_xlsx(tmp_path / "bank.xlsx")
+    import_questions(store.questions, xlsx)
+    rows_after_first = _question_row_count(store)
+
+    second = import_questions(store.questions, xlsx)
+
+    assert second.created == 0
+    assert second.skipped == len(_XLSX_ROWS)  # unchanged content → no new versions
+    assert _question_row_count(store) == rows_after_first
