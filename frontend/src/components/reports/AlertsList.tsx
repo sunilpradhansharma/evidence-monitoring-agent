@@ -18,7 +18,7 @@ export default function AlertsList({ alerts }: { alerts: AlertItem[] }) {
       {alerts.map((a) => (
         <div
           key={a.response_id}
-          className={`card border-l-4 p-4 ${SEV_BAR[a.severity] ?? "border-l-slate-400"}`}
+          className={`card lift border-l-4 p-5 ${SEV_BAR[a.severity] ?? "border-l-slate-400"}`}
         >
           <div className="flex flex-wrap items-center gap-2">
             <span
@@ -28,7 +28,7 @@ export default function AlertsList({ alerts }: { alerts: AlertItem[] }) {
             >
               sev {a.severity}
             </span>
-            <span className="font-extrabold">{a.question_id}</span>
+            <span className="id font-extrabold">{a.question_id}</span>
             <span className="tag tag-muted">{a.model}</span>
             <span className="tag tag-muted">{a.persona.toLowerCase()}</span>
             {a.rules.map((r, i) => (

@@ -33,7 +33,9 @@ export default function Masthead() {
     <header>
       <div className="flex items-center gap-3 pt-7">
         <ShieldIcon />
-        <h1 className="text-2xl font-bold tracking-tight text-ink">Evidence Monitoring AI Agent</h1>
+        <h1 className="text-[1.7rem] font-extrabold tracking-tight text-ink">
+          Evidence Monitoring AI Agent
+        </h1>
       </div>
       <p className="mt-2 max-w-[72ch] text-[0.97rem] text-ink-soft">
         How public AI models represent the therapy versus competitors. Only approved questions are

@@ -63,8 +63,8 @@ export default function ReportsView() {
       </div>
 
       {/* Headline band */}
-      <div className="mt-4 rounded-xl border border-brand-line bg-surface border-l-4 border-l-brand p-4 shadow-card">
-        <p className="text-[1.05rem] font-medium text-ink">{report.headline}</p>
+      <div className="lift mt-5 rounded-xl border border-brand-line bg-surface border-l-4 border-l-brand p-5 shadow-card">
+        <p className="text-[1.18rem] font-medium leading-snug text-ink">{report.headline}</p>
       </div>
 
       <Section title="Run summary" note="Capture and signal counts for the selected run. The truncated and failed/blocked cards turn amber/red when a run has a problem.">

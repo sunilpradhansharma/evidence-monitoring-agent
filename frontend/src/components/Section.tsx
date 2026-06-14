@@ -15,10 +15,10 @@ export default function Section({ title, note, children, delay = 0, className = 
   const style = reduced ? undefined : { animationDelay: `${delay}ms` };
   const anim = reduced ? "" : "animate-fade-up";
   return (
-    <section className={`mt-8 ${anim} ${className}`} style={style}>
+    <section className={`mt-11 ${anim} ${className}`} style={style}>
       {title && <h2 className="section-title">{title}</h2>}
       {note && <p className="section-note">{note}</p>}
-      <div className={title ? "mt-3" : ""}>{children}</div>
+      <div className={title ? "mt-4" : ""}>{children}</div>
     </section>
   );
 }

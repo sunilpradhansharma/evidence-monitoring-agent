@@ -47,13 +47,13 @@ export default function QuestionCard({
 
   return (
     <div
-      className={`card p-4 transition-all duration-300 ${
+      className={`card lift p-5 transition-all duration-300 ease-spring ${
         leaving ? "translate-x-3 opacity-0" : "opacity-100"
       }`}
       data-question-id={q.question_id}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-extrabold">{q.question_id}</span>
+        <span className="id font-extrabold">{q.question_id}</span>
         <span className="tag">{q.persona.toLowerCase()}</span>
         <span className="tag tag-muted">{q.therapeutic_area}</span>
         <span className="tag tag-muted">{q.domain.toLowerCase()}</span>

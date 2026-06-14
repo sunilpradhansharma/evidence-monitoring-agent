@@ -8,6 +8,14 @@
   }
   body {
     @apply bg-page text-ink font-sans antialiased;
+    letter-spacing: -0.005em;
+  }
+  /* Monospace reserved for IDs / code. */
+  code,
+  kbd,
+  samp,
+  pre {
+    @apply font-mono;
   }
 }
 
@@ -43,10 +51,22 @@
            focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand-soft;
   }
   .section-title {
-    @apply text-lg font-bold tracking-tight text-ink;
+    @apply text-[1.35rem] font-bold leading-tight text-ink;
+    letter-spacing: -0.018em;
   }
   .section-note {
-    @apply mt-0.5 max-w-[80ch] text-sm text-ink-soft;
+    @apply mt-1 max-w-[80ch] text-sm text-ink-soft;
+  }
+  /* Monospace id chip for short identifiers (question ids, response ids). */
+  .id {
+    @apply font-mono;
+  }
+  /* Gentle, slightly springy hover lift for content cards + interactive cells. */
+  .lift {
+    @apply transition-[transform,box-shadow] duration-200 ease-spring;
+  }
+  .lift:hover {
+    @apply -translate-y-0.5 shadow-lift;
   }
 }
 

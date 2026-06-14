@@ -23,6 +23,7 @@ export default {
       },
       fontFamily: {
         sans: [
+          "Figtree",
           "Inter",
           "-apple-system",
           "BlinkMacSystemFont",
@@ -32,11 +33,24 @@ export default {
           "Arial",
           "sans-serif",
         ],
+        mono: [
+          "JetBrains Mono",
+          "ui-monospace",
+          "SFMono-Regular",
+          "Menlo",
+          "Consolas",
+          "monospace",
+        ],
       },
       borderRadius: { xl: "12px" },
+      // Layered, soft shadows so surfaces lift off the page (still subtle). Shadow tint uses the
+      // existing ink color (16,32,48) — no palette color is introduced or changed.
       boxShadow: {
-        card: "0 1px 2px rgba(16,32,48,0.05), 0 1px 1px rgba(16,32,48,0.04)",
-        lift: "0 6px 18px rgba(16,32,48,0.10)",
+        card: "0 1px 2px rgba(16,32,48,0.04), 0 4px 12px -2px rgba(16,32,48,0.08)",
+        lift: "0 2px 6px -2px rgba(16,32,48,0.10), 0 14px 30px -8px rgba(16,32,48,0.16)",
+      },
+      transitionTimingFunction: {
+        spring: "cubic-bezier(0.34, 1.4, 0.64, 1)",
       },
       keyframes: {
         "fade-up": {
@@ -45,7 +59,7 @@ export default {
         },
       },
       animation: {
-        "fade-up": "fade-up 0.45s ease-out both",
+        "fade-up": "fade-up 0.5s cubic-bezier(0.34, 1.4, 0.64, 1) both",
       },
     },
   },

@@ -40,7 +40,7 @@ export default function CoverageMap({
             {rows.map((row) => (
               <tr key={row.question_id}>
                 <td className="rounded-lg border border-hair bg-surface px-3 py-2 align-middle text-sm leading-snug">
-                  <span className="block text-xs font-bold text-ink">{row.question_id}</span>
+                  <span className="id block text-xs font-bold text-ink">{row.question_id}</span>
                   <span className="text-ink-soft">{row.label}</span>
                 </td>
                 {row.cells.map((cell, i) => {
@@ -64,7 +64,7 @@ export default function CoverageMap({
                           onClick={() => onOpen(cell.response_id!)}
                           title={cell.title}
                           aria-label={`${row.question_id} × ${models[i]}: ${cell.label}`}
-                          className={`relative flex h-12 w-full items-center justify-center rounded-lg px-2 text-sm font-bold transition-transform hover:-translate-y-0.5 hover:shadow-lift focus:outline-none focus:ring-2 focus:ring-brand ${s.box}`}
+                          className={`relative flex h-12 w-full items-center justify-center rounded-lg px-2 text-sm font-bold transition-[transform,box-shadow] duration-200 ease-spring hover:-translate-y-0.5 hover:shadow-lift focus:outline-none focus:ring-2 focus:ring-brand ${s.box}`}
                         >
                           {inner}
                         </button>

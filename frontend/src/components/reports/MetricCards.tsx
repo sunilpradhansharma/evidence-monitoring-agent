@@ -31,15 +31,15 @@ function MetricCard({
   const shown = useCountUp(value, { decimals });
   const t = TONE[tone];
   return (
-    <div className={`relative overflow-hidden rounded-xl border p-4 shadow-card ${t.card}`}>
+    <div className={`lift relative overflow-hidden rounded-xl border p-5 shadow-card ${t.card}`}>
       <span className={`absolute inset-y-0 left-0 w-1 ${t.bar}`} aria-hidden="true" />
       <div className="text-[0.72rem] font-bold uppercase tracking-wider text-ink-soft">{label}</div>
-      <div className={`mt-1.5 text-3xl font-extrabold tabular-nums ${t.value}`}>
+      <div className={`mt-2 text-3xl font-extrabold tabular-nums ${t.value}`}>
         {shown}
         {suffix}
         {extra}
       </div>
-      {sub && <div className="mt-1.5 text-xs text-ink-soft">{sub}</div>}
+      {sub && <div className="mt-2 text-xs text-ink-soft">{sub}</div>}
     </div>
   );
 }
@@ -47,7 +47,7 @@ function MetricCard({
 export default function MetricCards({ m, gate }: { m: Metrics; gate: ApprovalGate }) {
   const byType = Object.entries(m.alerts_by_type);
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
       <MetricCard label="Responses" value={m.total} sub="total in view" />
       <MetricCard
         label="Success"

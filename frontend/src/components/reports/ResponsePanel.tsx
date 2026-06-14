@@ -45,7 +45,7 @@ export default function ResponsePanel({
           {data && (
             <>
               <div className="flex flex-wrap gap-2">
-                <span className="tag tag-muted">{data.question_id}</span>
+                <span className="id tag tag-muted">{data.question_id}</span>
                 <span className="tag tag-muted">{data.llm_name}</span>
                 <span className="tag tag-muted">{data.persona.toLowerCase()}</span>
                 <span className="tag">{data.status.toLowerCase()}</span>
