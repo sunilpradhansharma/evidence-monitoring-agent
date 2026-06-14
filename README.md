@@ -78,7 +78,6 @@ Shows where the whole system sits — who uses it, where it runs, and which exte
 
 ![System context](docs/diagrams/evidence_monitor_system_context.svg)
 
-**How to read it, step by step:**
 1. Everything inside **"Your local machine"** is the POC; everything under **"External LLM services (internet)"** lives outside it, reached over HTTPS.
 2. A **local scheduler** (cron, daily at 02:00) kicks off a **run** of the **Evidence Monitoring Agent** (the local Python POC).
 3. **Medical Affairs** sits on the left and feeds the agent by **curating + approving** questions — nothing runs against an unapproved question.
@@ -92,7 +91,6 @@ Answers "what happens to one approved question, from input config all the way to
 
 ![Detailed end-to-end pipeline](docs/diagrams/evidence_monitor_detailed_pipeline.svg)
 
-**How to read it, step by step:**
 1. **Inputs** feed the run: `config.yaml` (targets, limits, params), `.env` secrets (API keys), and the question CSV (Medical Affairs curation).
 2. Those load the **Question repository** — versioned, with the `PENDING → APPROVED` gate.
 3. The **Orchestrator (Claude)** pulls only **APPROVED** questions and assigns a `run_id`.
@@ -108,7 +106,6 @@ Answers "what are the explicit, code-defined steps of a run — and how does it 
 
 ![LangGraph orchestration state graph](docs/diagrams/orchestrator_detailed_langgraph_graph.svg)
 
-**How to read it, step by step:**
 1. The run begins at **START** and enters **`init_run`**, which sets the `run_id`, loads config, and figures out any resume point.
 2. **`load_questions`** pulls the questions whose `status = APPROVED`.
 3. **`dispatch + collect`** submits each question to each target (retry ≤ 3); the loop arrow (↻) shows it repeats per question × target.
@@ -123,7 +120,6 @@ Answers "for a single question sent to a single target, how do we decide whether
 
 ![Per-question dispatch — four outcomes](docs/diagrams/per_question_dispatch_four_outcomes.svg)
 
-**How to read it, step by step:**
 1. **Pull question**, then **Submit to target** (rate-limited) and inspect the **`finish_reason`** the target returns.
 2. **`ok`** → store the record as **SUCCESS**.
 3. **`length`** (the answer hit the token ceiling) → **bump `max_tokens` and retry once**; if still cut off, store as **TRUNCATED** with the full captured text preserved.
@@ -137,7 +133,6 @@ Answers "in time order, which component calls which during a daily run?"
 
 ![Daily-run sequence](docs/diagrams/detailed_daily_run_sequence.svg)
 
-**How to read it, step by step:**
 1. The **daily run** starts the **Orchestrator (Claude)**, which first loads config + secrets.
 2. The orchestrator asks the **Question repository** to **fetch approved**, and gets back the **question batch**.
 3. It then enters a **loop · per question × target**, submitting each to the **LLM targets** (3 public LLMs) with **retry ≤ 3**, receiving a **response / error**.
@@ -151,7 +146,6 @@ Answers "how does one stored response become a structured score, and how does co
 
 ![Scoring and alert decision flow](docs/diagrams/scoring_and_alert_decision_flow.svg)
 
-**How to read it, step by step:**
 1. Start from a **Response record** (its full `response_text`) and the **MA-reviewed scoring prompt** template.
 2. **Claude scoring** (Bedrock / API) reads both and returns **structured JSON**: `sentiment_score` (−1..+1), `competitive_position`, `citation_status` (including **WRONG_INDICATION** for wrong-disease content), `brand_mentions[]`, up to five `key_claims`, and a `scoring_rationale`.
 3. That score is saved as a **scoring record** — versioned and linked to the `response_id` — so the original response is never altered and re-scoring keeps history.
@@ -261,7 +255,6 @@ erDiagram
 
 > An interactive version is also available: [`docs/diagrams/evidence_monitor_detailed_erd.html`](docs/diagrams/evidence_monitor_detailed_erd.html).
 
-**How to read it, step by step:**
 1. A **QUESTION** (with its persona, therapeutic area, brand focus, domain, approval status, and version) is *asked in* many **RESPONSE** records — one question, many answers.
 2. An **LLM_TARGET** (its model version, parameters, and rate limits) *answers* many **RESPONSE** records — one target, many answers.
 3. A **RUN** (with its trigger, timings, counts, tokens, and cost) *batches* many **RESPONSE** records and also *logs* many **AUDIT_LOG** entries.
@@ -275,7 +268,6 @@ Answers "when this runs on one laptop, what processes, files, and folders are ac
 
 ![Local execution view](docs/diagrams/evidence_monitor_local_execution_view.svg)
 
-**How to read it, step by step:**
 1. Everything happens inside one **Local machine** — no cloud services in the POC.
 2. **cron / APScheduler** (daily 02:00) launches the **Python process** (`evidence_monitor run`).
 3. At startup the process reads **config + secrets** (`targets.yaml`, `.env`).
