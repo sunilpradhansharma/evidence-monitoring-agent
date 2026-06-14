@@ -55,7 +55,9 @@ select = ["E", "F", "I", "UP", "B", "SIM", "W"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --cov=src/evidence_monitor --cov-report=term-missing"
+# Constitution XI: the full suite must keep core coverage above the floor or fail the build.
+# 70 is the floor; actual coverage runs well above it. Use `--no-cov` for quick subset runs.
+addopts = "-q --cov=src/evidence_monitor --cov-report=term-missing --cov-fail-under=70"
 pythonpath = ["src", "."]
 
 [tool.coverage.run]

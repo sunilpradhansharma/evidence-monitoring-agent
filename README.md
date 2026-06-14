@@ -331,7 +331,7 @@ For each response, Claude returns a structured object (validated against a JSON 
 │   ├── SRS.pdf                   # Software Requirements Specification (source of scope)
 │   ├── technical-architecture.md # Architecture, invariants, data model, ADR index, prod swap
 │   ├── project-status.md         # LIVING status: phases, decisions, open items, how to resume
-│   ├── adr/                      # Architecture Decision Records (0001–0006)
+│   ├── adr/                      # Architecture Decision Records (0001–0007)
 │   └── diagrams/                 # System, pipeline, orchestrator, ERD, sequence, etc.
 ├── specs/001-evidence-monitoring-poc/
 │   ├── spec.md  plan.md  research.md  data-model.md  tasks.md  quickstart.md
@@ -369,7 +369,7 @@ Start from the constitution and spec; everything downstream traces back to them.
 
 ## How to run
 
-> Build is in progress; the commands below reflect the planned CLI (see
+> The POC is built; the commands below are the actual CLI (see
 > [`specs/.../contracts/cli.md`](specs/001-evidence-monitoring-poc/contracts/cli.md) and
 > [`quickstart.md`](specs/001-evidence-monitoring-poc/quickstart.md)).
 
@@ -377,10 +377,14 @@ Start from the constitution and spec; everything downstream traces back to them.
 ```bash
 uv sync
 uv run evidence-monitor health-check --mock
-uv run evidence-monitor import-questions --file data/question_bank.csv
-uv run evidence-monitor run --mock          # full capture → score → alert → dashboard, all mocked
-uv run pytest -q                            # unit + component + e2e
+uv run evidence-monitor import-questions --file data/question_bank.csv   # seed as PENDING
+uv run evidence-monitor run --mock          # full capture → score → alert, all mocked
+uv run pytest -q                            # unit + component + e2e (all offline)
 ```
+
+The full mock pipeline is exercised end-to-end by `tests/e2e/` — a run over the whole seed bank
+asserts **≥95% successful capture** (and that a flaky target never sinks the run) and that the
+self-contained dashboard plus CSV/JSON exports are produced.
 
 > `uv sync` installs the runtime deps **and** the dev tooling (pytest, ruff): they live in the
 > default `dev` dependency group, so `uv run pytest` / `uv run ruff` work with no `--extra` flag.
@@ -392,10 +396,16 @@ uv run uvicorn evidence_monitor.api:app     # Reports + Approvals UI
 uv run evidence-monitor run                 # a live run over APPROVED questions
 ```
 
+A live `run` (or `subset`) runs a **startup credential preflight** first: if any required key is
+missing it exits non-zero with a clear, non-secret error and submits nothing (FR-032). The same
+presence gate backs `GET /health`. Resolved keys are registered for redaction, and all logs pass
+through the secret-redacting formatter, so a credential can never reach a log sink.
+
 ## Roadmap
 
-- **Now:** finish the POC build (per `tasks.md`) — capture & store → scoring → approval gate →
-  alerts → dashboard.
+- **Now:** POC build complete (per `tasks.md`) — capture & store → scoring → approval gate →
+  alerts → dashboard, with an offline e2e suite asserting ≥95% capture. Next is the POC readout /
+  acceptance validation.
 - **Acceptance:** a 7-day unattended run with zero interventions, ≥95% capture, and a dashboard
   stakeholders confirm is actionable.
 - **Production (future):** SQLite → Aurora/DynamoDB, Anthropic API → Bedrock, local scheduler →

@@ -6,9 +6,11 @@ limits, thresholds, paths, cron, and the token budget are all externalized
 (Principle V). API keys are held as ``SecretStr`` so they are never emitted by
 logging, reprs, or tracebacks (secrets are never logged).
 
-Note: this module only *loads* configuration. The startup credential preflight
-(presence + reachability checks) is a later, Foundational concern and is not
-implemented here.
+This module loads configuration and owns the *presence* half of the startup
+credential preflight (:func:`credential_preflight`). The CLI (``preflight_or_error``)
+and the web ``/health`` endpoint share that gate so a live run submits nothing
+when a required credential is missing (FR-032); reachability is probed per target
+by the adapter health checks.
 """
 
 from __future__ import annotations

@@ -15,14 +15,22 @@ Commercial. See [README.md](../README.md) and [technical-architecture.md](techni
 
 ## Current status
 
-**Design complete; implementation not yet started.** The full spec-driven chain (constitution →
-spec → clarify → plan → tasks → analyze → checklist) is done, reviewed, and committed. The
-88-task breakdown in [`tasks.md`](../specs/001-evidence-monitoring-poc/tasks.md) is ready for
-`/speckit.implement`. Documentation (this set) is being written. No application code exists yet.
+**Implementation essentially complete; POC readout/acceptance is the remaining step.** The full
+spec-driven chain (constitution → spec → clarify → plan → tasks → analyze → checklist) is done and
+committed, and the application is built end-to-end per [`tasks.md`](../specs/001-evidence-monitoring-poc/tasks.md):
+foundational seams → capture & store → scoring → approval gate → deterministic alerts → dashboard +
+reports + `/health`, with the scheduler, CLI, cost/budget accounting, and an offline e2e suite.
 
+- **Pipeline runs offline:** `evidence-monitor run --mock` executes the whole capture → score →
+  alert flow with no keys or network; `tests/e2e/` asserts **≥95% capture** over the full seed
+  bank (including a flaky-target case) and that the self-contained dashboard + CSV/JSON exports are
+  produced.
+- **Hardening in place:** structured JSON logs with secret redaction; a **startup credential
+  preflight** on the live CLI `run`/`subset` path and `GET /health` (missing key → clear,
+  non-secret error, nothing submitted); ≥70% coverage on core modules (overall ~91%).
 - **Question bank:** 162 questions present (`data/question_bank.csv`) — Patient 59 · Prospect 49 ·
   Provider 54, across Immunology / Neuroscience / Oncology. **All PENDING** (none approved → none
-  submittable yet).
+  submittable yet); import + approve via the CLI (`import-questions`, `approve`) or the Approvals UI.
 - **Acceptance targets:** 7-day unattended run, zero interventions; ≥95% capture; ≥30
   questions/persona across ≥2 therapeutic areas.
 
@@ -39,23 +47,26 @@ Legend: ✅ done · 🟡 in progress · ⬜ not started. "Verify" = the phase's 
 | 4 | Plan (architecture, data-model, contracts) | Constitution Check PASS (pre + post) | ✅ | `dbae1da` |
 | 5 | Tasks (dependency-ordered breakdown) | 88 tasks, all traceable | ✅ | `c9b86ce` |
 | 6 | Analyze + Checklist (consistency + requirements quality) | 0 CRITICAL; gaps remediated | ✅ | `b56cdad`, `48e5992` |
-| 7 | Documentation (README, architecture, status, ADRs) | This set written & reviewed | 🟡 | _TBD_ |
-| 8 | Implementation (build per tasks.md) | All Impl rows below complete | ⬜ | _TBD_ |
+| 7 | Documentation (README, architecture, status, ADRs) | This set written & reviewed | ✅ | `ebeb648`, `b53b791` |
+| 8 | Implementation (build per tasks.md) | All Impl rows below complete | 🟡 | see rows |
 
 ### Implementation sub-phases (Phase 8)
 
+Rows are grouped by user story; the delivering commit(s) are listed. (Commit messages carry their
+own `Impl-N` labels in build order, which differ from these planning rows.)
+
 | Step | Description | Tasks | Status | Commit |
 |------|-------------|-------|--------|--------|
-| Impl-1 | Setup (package, deps, tooling) | T001–T004 | ⬜ | |
-| Impl-2 | Foundational seams (data_access, SQLite, schemas, audit, seed) | T005–T020 | ⬜ | |
-| Impl-3 | US1 — capture & store (adapters, run, resume) 🎯 MVP | T021–T048 | ⬜ | |
-| Impl-4 | US2 — scoring (structured, versioned) | T049–T055 | ⬜ | |
-| Impl-5 | US3 — question curation & approval gate | T056–T063 | ⬜ | |
-| Impl-6 | US4 — deterministic alerts | T064–T069 | ⬜ | |
-| Impl-7 | US5 — dashboard, reports, run summary, /health | T070–T078 | ⬜ | |
-| Impl-8 | Retention / soft-delete | T086–T087 | ⬜ | |
-| Impl-9 | Performance proxy | T088 | ⬜ | |
-| Impl-10 | Polish & cross-cutting (e2e, capture-rate, coverage, README, audit) | T079–T085 | ⬜ | |
+| Impl-1 | Setup (package, deps, tooling) | T001–T004 | ✅ | `d28cfc5` |
+| Impl-2 | Foundational seams (data_access, SQLite, schemas, audit, seed) | T005–T020 | ✅ | `499f562` |
+| Impl-3 | US1 — capture & store (adapters, run, resume) 🎯 MVP | T021–T048 | ✅ | `bbb0dd8`, `b3d5730`, `65be66f`, `5a65974` |
+| Impl-4 | US2 — scoring (structured, versioned) | T049–T055 | ✅ | `3b3636d`, `31e22ae` |
+| Impl-5 | US3 — question curation & approval gate | T056–T063 | ✅ | `3a273b1`, `a86aec2` |
+| Impl-6 | US4 — deterministic alerts | T064–T069 | ✅ | `65be66f` |
+| Impl-7 | US5 — dashboard, reports, run summary, /health | T070–T078 | ✅ | `2e3e948`, `68085a1` |
+| Impl-8 | Retention / soft-delete (`deactivate`, never purge) | T086–T087 | ✅ | `499f562` |
+| Impl-9 | Performance proxy (concurrency / rate-limit timing) | T088 | ⬜ | _deferred to readout_ |
+| Impl-10 | Polish & cross-cutting (e2e, capture-rate, coverage, preflight, docs) | T079–T085 | 🟡 | _this session (uncommitted)_ |
 | Impl-11 | POC readout / acceptance validation | — | ⬜ | |
 
 ## Decisions log
@@ -81,6 +92,11 @@ Legend: ✅ done · 🟡 in progress · ⬜ not started. "Verify" = the phase's 
 - **Single submission per question/target/run**, 24-month retention via soft-delete, alert
   defaults (negative −0.3, competitor ≥0.3), retry budget (3 attempts, 2s/4s/8s) — set during
   `/speckit.clarify` and the analysis remediation.
+- **Offline, deterministic e2e + capture-rate gate.** The ≥95% capture guarantee is enforced by an
+  e2e suite that runs the whole pipeline over the seed in mock mode (no keys/network), including a
+  flaky-target case that still clears the bar. The CLI `run`/`subset` live path runs the same
+  credential preflight as `/health` (missing key → clear non-secret error, nothing submitted), and
+  `import-questions` is now a first-class CLI command. (ADR-0007)
 
 ## Stakeholder facts
 
@@ -112,8 +128,9 @@ Legend: ✅ done · 🟡 in progress · ⬜ not started. "Verify" = the phase's 
    [`tasks.md`](../specs/001-evidence-monitoring-poc/tasks.md).
 3. Confirm you're on branch `001-evidence-monitoring-poc` (`git status` clean) and synced with
    `origin`.
-4. Run `/speckit.implement` to begin (or continue) Phase 8, starting at the first incomplete
-   `Impl-*` step. Follow the constitution; let the `constitution-guardian` and
-   `content-agnostic-auditor` subagents check staged changes before commit.
+4. Sanity-check the build offline: `uv sync && uv run pytest -q` (full suite, offline) and
+   `uv run evidence-monitor run --mock` (whole pipeline, mocked). The remaining open items are the
+   **performance proxy** (Impl-9) and the **POC readout / acceptance validation** (Impl-11).
 5. After each phase's Verify passes, update the roadmap status + commit hash here, and append any
-   new decision to the log.
+   new decision to the log; let the `constitution-guardian` and `content-agnostic-auditor`
+   subagents check staged changes before commit.

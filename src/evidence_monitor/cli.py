@@ -2,6 +2,7 @@
 
 Commands:
 - ``run`` — execute a full run over the approved question bank.
+- ``import-questions`` — import a curated CSV/Excel bank as PENDING (idempotent upsert by id).
 - ``dry-run`` — validate config + target connectivity and write NOTHING (no run, no DB writes).
 - ``subset`` — run over a subset of approved questions filtered by persona / therapeutic area /
   domain.
@@ -21,7 +22,7 @@ import argparse
 import sys
 
 from evidence_monitor.alerts.rules import AlertThresholds
-from evidence_monitor.config.settings import Settings, get_settings
+from evidence_monitor.config.settings import Settings, credential_preflight, get_settings
 from evidence_monitor.data_access.models import (
     AuditEventType,
     Domain,
@@ -33,11 +34,12 @@ from evidence_monitor.data_access.sqlite_store import SqliteStore
 from evidence_monitor.llm.adapters.base import HealthResult
 from evidence_monitor.llm.client import ClaudeClient
 from evidence_monitor.llm.registry import build_adapter, load_prices, load_targets
-from evidence_monitor.observability.logging import get_logger, log_event
+from evidence_monitor.observability.logging import get_logger, log_event, register_secret
 from evidence_monitor.orchestrator import OrchestratorContext, RunManager
 from evidence_monitor.orchestrator import run as run_graph
 from evidence_monitor.orchestrator.state import QuestionFilter, RunState, RunSummary
 from evidence_monitor.question_repo.approval import ApprovalError, approval_audit_event
+from evidence_monitor.question_repo.importer import ImportReport, import_questions
 from evidence_monitor.question_repo.repository import QuestionService
 from evidence_monitor.scoring.scorer import Scorer
 
@@ -80,6 +82,28 @@ def check_targets(settings: Settings, *, mock: bool) -> list[tuple[str, HealthRe
         (t.target_id, build_adapter(t, mock=mock).health())
         for t in load_targets(settings.targets_config_path)
     ]
+
+
+def preflight_or_error(settings: Settings) -> str | None:
+    """Startup credential preflight (FR-032; Principle VI) for live runs.
+
+    Returns a clear, NON-SECRET error string when any required credential is missing (so the
+    caller can submit nothing and exit non-zero), or ``None`` when all are present. On success the
+    resolved secrets are registered with the logger so they are masked everywhere (never logged).
+    The web ``/health`` endpoint exposes the same presence gate (shared ``credential_preflight``).
+    """
+    missing = credential_preflight(settings)
+    if missing:
+        return (
+            "preflight failed: missing required credential(s): "
+            + ", ".join(missing)
+            + " — set them in .env or the environment. Nothing was submitted."
+        )
+    for field_name in ("anthropic_api_key", "openai_api_key", "google_api_key"):
+        secret = getattr(settings, field_name)
+        if secret is not None:
+            register_secret(secret.get_secret_value())  # mask it in every log sink
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -128,6 +152,20 @@ def cmd_dry_run(settings: Settings, *, mock: bool) -> bool:
     ok = cmd_health_check(settings, mock=mock)
     print("dry-run: validated, wrote nothing")
     return ok
+
+
+def cmd_import_questions(
+    store: SqliteStore, file_path: str, *, dry_run: bool = False
+) -> ImportReport:
+    """Import a curated question bank as PENDING (idempotent upsert by id). Returns the report."""
+    report = import_questions(store.questions, file_path, dry_run=dry_run)
+    verb = "would import" if dry_run else "imported"
+    print(
+        f"{verb} {report.processed} question(s) from {file_path}: "
+        f"created={report.created} updated={report.updated} skipped={report.skipped} "
+        f"(all PENDING — approve before any run)"
+    )
+    return report
 
 
 def cmd_approve(store: SqliteStore, question_id: str, approver: str) -> Question:
@@ -190,6 +228,14 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("dry-run", help="validate config + connectivity; write nothing")
     sub.add_parser("health-check", help="verify connectivity to all configured targets")
 
+    importer = sub.add_parser(
+        "import-questions", help="import a curated question bank (CSV/Excel) as PENDING"
+    )
+    importer.add_argument("--file", required=True, help="path to the question-bank CSV/Excel file")
+    importer.add_argument(
+        "--dry-run", action="store_true", help="report what would import without writing"
+    )
+
     subset = sub.add_parser("subset", help="run a subset of approved questions")
     subset.add_argument("--persona", choices=[p.value for p in Persona])
     subset.add_argument("--therapeutic-area")
@@ -221,10 +267,28 @@ def main(argv: list[str] | None = None) -> int:
     mock = bool(args.mock) or settings.offline_mock
 
     if args.command in ("run", "subset"):
+        # Live runs preflight credentials BEFORE touching the store or any target (FR-032). Mock
+        # runs are fully offline (no keys), so the gate is skipped.
+        if not mock:
+            error = preflight_or_error(settings)
+            if error is not None:
+                print(f"error: {error}", file=sys.stderr)
+                return 1
         store = SqliteStore(settings.db_path)
         try:
             question_filter = _subset_filter(args) if args.command == "subset" else None
             cmd_run(settings, store, mock=mock, question_filter=question_filter)
+        finally:
+            store.close()
+        return 0
+
+    if args.command == "import-questions":
+        store = SqliteStore(settings.db_path)
+        try:
+            cmd_import_questions(store, args.file, dry_run=args.dry_run)
+        except (OSError, ValueError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
         finally:
             store.close()
         return 0
@@ -264,7 +328,9 @@ __all__ = [
     "cmd_approve",
     "cmd_dry_run",
     "cmd_health_check",
+    "cmd_import_questions",
     "cmd_reject",
     "cmd_run",
     "main",
+    "preflight_or_error",
 ]

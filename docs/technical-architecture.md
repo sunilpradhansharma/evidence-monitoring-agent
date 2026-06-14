@@ -55,6 +55,7 @@ Full records in [`docs/adr/`](adr/):
 | [0004](adr/0004-immutable-responses-versioned-scores.md) | Immutable responses + versioned scoring records |
 | [0005](adr/0005-combined-local-ui.md) | Combined Reports + Approvals UI, local-only, approver-name, no RBAC |
 | [0006](adr/0006-citation-status-wrong-indication.md) | `citation_status` with `WRONG_INDICATION` + highest-severity alert |
+| [0007](adr/0007-offline-e2e-capture-rate-and-cli-preflight.md) | Offline e2e capture-rate gate + CLI credential preflight |
 
 ## 4. Module / package map
 
@@ -165,8 +166,10 @@ than trust it blindly (Constitution VII).
 
 - **Unit** — schemas, repositories, adapters (mock), alert rules, redaction, cost.
 - **Component** — approval gate, orchestrator nodes, queries, scoring versioning, APIs.
-- **E2E** — a full mock run over the seed: capture-rate ≥95%, schema conformance, resume,
-  dashboard render.
+- **E2E** — a full mock run over the seed bank (`tests/e2e/`): captures every (APPROVED question ×
+  eligible target), asserts **≥95% capture** (including a flaky-target case that still clears the
+  bar), scores + alerts, resumes without duplicates, and produces the self-contained dashboard plus
+  CSV/JSON exports.
 - **Gates** — ≥70% coverage on core modules; the capture-rate and scoring schema are asserted by
   automated tests; `ruff` format/lint via a PostToolUse hook. (Constitution XI.)
 
@@ -176,8 +179,9 @@ than trust it blindly (Constitution VII).
   token budget; runs the credential preflight.
 - `config/targets.yaml` — targets, model versions, parameters, rate limits, personas served, ToS
   acknowledgment.
-- Entry points: `cli.py` (`run` / `dry-run` / `subset` / `health-check`), `scheduler.py` (daily
-  cron), `api.py` (Reports + Approvals + `/health`).
+- Entry points: `cli.py` (`run` / `import-questions` / `dry-run` / `subset` / `health-check` /
+  `approve` / `reject`; a live `run`/`subset` runs the credential preflight first), `scheduler.py`
+  (daily cron), `api.py` (Reports + Approvals + `/health`).
 
 ## 14. POC → production
 
