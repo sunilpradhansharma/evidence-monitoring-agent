@@ -9,12 +9,14 @@
 ## Project summary
 
 A local, spec-driven POC that monitors how public LLMs represent the sponsor's therapies versus
-competitors, for Medical Affairs and Commercial. Three public models are queried as configured
-targets — **OpenAI GPT-4o, Google Gemini, and Anthropic Claude** (Claude is also the orchestrator +
-scorer) — with a fourth, **Open Evidence**, defined as a conditional Provider-only target that is
-**inactive** pending real API access and ToS review. The system captures and scores only; a human
-approves every question before submission. See [README.md](../README.md) and
-[technical-architecture.md](technical-architecture.md).
+competitors, for Medical Affairs and Commercial. Public models are queried as configured targets —
+**OpenAI GPT-4o (`gpt-4o-2024-08-06`), Google Gemini (`gemini-2.5-flash`), and Anthropic Claude
+(`claude-sonnet-4-6`)** (Claude is also the orchestrator + scorer). For the Provider persona there is
+a **"Provider evidence (dev)"** target — a development stand-in (PubMed retrieval + Claude synthesis)
+that is **explicitly NOT Open Evidence** and is currently active for readouts (ADR-0011); the real
+**Open Evidence** Provider target is present in config but **inactive / not yet built**. The system
+captures and scores only; a human approves every question before submission. See
+[README.md](../README.md) and [technical-architecture.md](technical-architecture.md).
 
 ## Current status
 
@@ -32,13 +34,17 @@ scheduler, CLI, cost/budget accounting, an offline e2e suite, a **React dashboar
   per-active-target round-trip (inactive targets are SKIPped, never reported live), and live
   runs/smoke tests print per-response capture + scoring confirmation with non-secret failure
   diagnostics.
-- **React dashboard (primary UI):** a Vite + TypeScript + Tailwind SPA (Recharts, Inter) served by
-  FastAPI at `http://127.0.0.1:8000`, backed by read-only `/api/*` endpoints that reuse the existing
-  `render.py` aggregation. The original server-rendered UI is retained at `/html`. (ADR-0008)
+- **React dashboard (primary UI):** a Vite + TypeScript + Tailwind SPA (Recharts; Figtree base font)
+  served by FastAPI at `http://127.0.0.1:8000`, backed by read-only `/api/*` endpoints that reuse the
+  existing `render.py` aggregation. The original server-rendered UI is retained at `/html`. (ADR-0008)
 - **Version-aware question counts:** all counts/lists use the latest version per `question_id`,
   fixing an earlier over-count over the immutable version history. (ADR-0009)
-- **Gemini truncation fixed:** thinking disabled (`thinking_budget=0`) + a modest `max_tokens` bump,
-  so Gemini answers complete like the other targets. (ADR-0010)
+- **Gemini truncation fixed:** thinking disabled (`thinking_budget=0`) + a modest `max_tokens` bump
+  (2048), so Gemini answers complete like the other targets. (ADR-0010)
+- **Provider evidence (dev) target:** a Provider-only development stand-in (PubMed E-utilities +
+  Claude synthesis) that exercises the Provider pipeline end-to-end while real Open Evidence access is
+  pending. Records the PubMed query + PMIDs as response provenance; fails gracefully if PubMed is
+  unreachable. **Not Open Evidence**, never reported as such. Currently `active: true` in config. (ADR-0011)
 - **Hardening in place:** structured JSON logs with secret redaction; a **startup credential
   preflight** on the live CLI `run`/`subset` path and `GET /health`; ≥70% coverage on core modules
   (overall ~91%).
@@ -78,7 +84,8 @@ Legend: ✅ done · 🟡 in progress · ⬜ not started. "Verify" = the phase's 
 | Impl-8 | Retention / soft-delete (`deactivate`, never purge) | ✅ | `499f562` |
 | Impl-9 | Polish & cross-cutting (e2e, capture-rate, coverage, preflight, docs) | ✅ | `fa06cb8` |
 | Impl-10 | Live bring-up (real model ids, honest health-check, per-failure diagnostics) | ✅ | `9282a7e` |
-| Impl-11 | React + Tailwind dashboard + read-only `/api`; version-aware counts; Gemini fix; Inter font | ✅ | `89f12cb`, `1707028`, `7e428ec` |
+| Impl-11 | React + Tailwind dashboard + read-only `/api`; version-aware counts; Gemini fix | ✅ | `89f12cb`, `1707028`, `7e428ec` |
+| Impl-12 | Typography polish (Figtree base font, depth/motion); "Provider evidence (dev)" target | ✅ | `1cc7089`, `6e2d573` |
 | Perf | Performance proxy (concurrency / rate-limit timing) | ⬜ | _deferred to readout_ |
 
 ## Decisions log
@@ -100,8 +107,27 @@ Legend: ✅ done · 🟡 in progress · ⬜ not started. "Verify" = the phase's 
   on the existing audited approval endpoints; legacy HTML kept at `/html`. (ADR-0008)
 - **Version-aware question counts** — latest version per `question_id` everywhere. (ADR-0009)
 - **Gemini thinking disabled + current model id** (config + adapter only) to stop truncation. (ADR-0010)
+- **"Provider evidence (dev)" stand-in** — a clearly-labeled PubMed+Claude dev target that is
+  explicitly NOT Open Evidence (honest attribution; no fabricated competitive intelligence) and must
+  never be presented as Open Evidence. Slots into the `llm` adapter seam. (ADR-0011)
 - **Single submission per question/target/run**, 24-month retention via soft-delete, alert defaults
   (negative −0.3, competitor ≥0.3), retry budget (3 attempts, 2s/4s/8s) — set during clarify/analysis.
+
+## Status at a glance
+
+| Area | State |
+|------|-------|
+| 3-LLM capture pipeline (GPT-4o, Gemini, Claude) | ✅ built & working |
+| Scoring (structured, versioned, explainable) | ✅ built & working |
+| 4 deterministic alert rules incl. `WRONG_INDICATION` | ✅ built & working |
+| React dashboard + read-only `/api` | ✅ built & working |
+| Approval workflow + append-only audit log | ✅ built & working |
+| Version-aware question counts | ✅ built & working |
+| "Provider evidence (dev)" target (PubMed + Claude) | ✅ built & working (DEV stand-in; not Open Evidence) |
+| Real Open Evidence integration | ⬜ not built (pending API key + org id + BAA + Legal sign-off) |
+| In-UI question authoring form | ⬜ not built |
+| Upstream/automated question feeds | ⬜ not built |
+| Performance proxy (concurrency/timing) | ⬜ deferred to readout |
 
 ## What is fully built and working
 
@@ -112,15 +138,20 @@ Legend: ✅ done · 🟡 in progress · ⬜ not started. "Verify" = the phase's 
 - The **React dashboard** (run selector, headline, metric cards, coverage heatmap, sentiment chart,
   citation panel, positioning table, alerts, response drill-down) and the **approval workflow**
   (reviewer-name gate, persona-grouped pending queue, read-only approved/rejected tables).
+- **Version-aware question counts** (latest version per `question_id`) across counts and lists.
+- The **"Provider evidence (dev)"** Provider target (PubMed E-utilities + Claude synthesis), with
+  PubMed-query + PMID provenance and graceful failure — a DEV stand-in, **not Open Evidence**.
 - The **append-only audit log**, structured logging with secret redaction, cost/token accounting,
   the scheduler, the CLI, and the offline e2e + capture-rate gate.
 
 ## Pending / not built
 
-- **Open Evidence real integration** — defined as a conditional Provider-only target but **inactive**
-  (`active: false`, `tos_acknowledged: false`, placeholder model id) pending real enterprise API
-  access and Legal/ToS review. Its absence does not count against the ≥95% capture target. *(No
-  separate dev/reference target exists in config; none is implied.)*
+- **Real Open Evidence integration** — the actual Open Evidence Provider target is **not built**. The
+  `open-evidence` config entry is **inactive** (`active: false`, `tos_acknowledged: false`,
+  placeholder model id). The real integration uses Open Evidence's **`createAnalysisStreaming`** API,
+  which requires an **API key + organization id + a signed BAA** (via their sales process) plus
+  Legal/ToS sign-off; credential slots (`OPENEVIDENCE_API_KEY`, `OPENEVIDENCE_ORG_ID`) exist but are
+  unused. The interim **"Provider evidence (dev)"** target stands in for it and is explicitly NOT it.
 - **In-UI question authoring** — questions are imported from CSV/Excel and approved in the UI/CLI;
   there is **no in-app form to create/edit question text** in the React UI (edit exists as a POST
   endpoint but is not surfaced in the SPA).
@@ -137,9 +168,14 @@ These are people decisions, not code, and they block live operation:
 - **Medical Affairs approval** of the question bank (it imports as PENDING; nothing is submittable
   until approved). The CLI `approve-all-test-numbered` helper is **for testing only**, not MA sign-off.
 - **Legal / ToS sign-off** confirming automated querying is permitted for each LLM provider
-  (Constitution VI). `tos_acknowledged` is set per target in config and must reflect a real review.
+  (Constitution VI). `tos_acknowledged` is set per target in config and must reflect a real review —
+  including the dev targets currently enabled for readouts (PubMed/NCBI usage policy for
+  "Provider evidence (dev)").
+- **Open Evidence access + BAA** — before the real Open Evidence target can be enabled: an API key,
+  an organization id, a signed BAA via their sales process, and Legal/ToS sign-off.
 - **Pin & confirm the exact model ids** for every target and for the Claude orchestrator/scorer
-  (model ids are config values, never hard-coded; current values are listed in ADR-0010).
+  (model ids are config values, never hard-coded; current values: `gpt-4o-2024-08-06`,
+  `gemini-2.5-flash`, `claude-sonnet-4-6`, and the configured Claude orchestrator/scorer id).
 
 ## Stakeholder facts
 

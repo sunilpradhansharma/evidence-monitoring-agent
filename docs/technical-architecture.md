@@ -62,6 +62,7 @@ Full records in [`docs/adr/`](adr/):
 | [0008](adr/0008-react-spa-over-fastapi-readonly-api.md) | React SPA primary UI, served by FastAPI over a read-only `/api` layer reusing `render.py` |
 | [0009](adr/0009-version-aware-question-counts.md) | Version-aware question counts (latest version per `question_id`) |
 | [0010](adr/0010-gemini-thinking-disabled.md) | Disable Gemini "thinking" + pin a current model id (config + adapter) |
+| [0011](adr/0011-provider-evidence-dev-target.md) | Labeled PubMed+Claude "Provider evidence (dev)" stand-in — explicitly NOT Open Evidence |
 
 ## 4. Module / package map
 
@@ -73,7 +74,9 @@ src/evidence_monitor/
 │                   sqlite_store.py, queries.py (filtered/paginated reads), audit.py (append-only)
 ├── llm/            client.py (Claude orchestrator + scorer; model id from config)  ← the LLM seam
 │                   adapters/ base.py (retry/backoff, rate limit, mock), openai_gpt4o.py,
-│                            gemini.py (safety→BLOCKED), claude_target.py, open_evidence.py
+│                            gemini.py (safety→BLOCKED), claude_target.py, open_evidence.py,
+│                            provider_evidence_dev.py (PubMed + Claude synthesis dev stand-in)
+│                   registry.py (config→adapter wiring + persona/active gating)
 ├── question_repo/  repository.py (CRUD + versioning), approval.py (gate), importer.py (CSV/Excel), seed.py
 ├── response_repo/  repository.py (immutable writes), schema.py (Response record)
 ├── scoring/        scorer.py (structured JSON), prompts.py (MA-reviewed prompt)
@@ -89,7 +92,7 @@ src/evidence_monitor/
 └── api.py          FastAPI: React SPA at "/", read-only /api/* JSON, /reports/* JSON + export,
                     read-write /approvals/* (the only writes), /health, legacy HTML at /html
 
-frontend/           React + TypeScript SPA (Vite, Tailwind, Recharts, Inter via @fontsource).
+frontend/           React + TypeScript SPA (Vite, Tailwind, Recharts, Figtree via @fontsource).
                     Builds to frontend/dist/ (git-ignored); FastAPI serves it at "/".
 ```
 
@@ -115,7 +118,7 @@ The seam is where immutability, versioning, append-only audit, and soft-delete/r
 One FastAPI app (`api.py`) is the whole web layer; there is no separate backend service.
 
 - **React SPA (primary UI).** `frontend/` is a Vite + TypeScript + Tailwind app (Recharts for the
-  sentiment chart, Inter via `@fontsource/inter`). `npm run build` emits static files to
+  sentiment chart, Figtree base font via `@fontsource/figtree`). `npm run build` emits static files to
   `frontend/dist/`. FastAPI serves them: hashed assets at `/assets`, and `index.html` at `/` and as
   the fallback for unknown client-side routes (registered **last** so it never shadows an API/HTML
   route). With no build present, `/` serves the legacy HTML instead, so the suite and a fresh
@@ -188,6 +191,34 @@ Every target implements the adapter protocol in `llm/adapters/base.py`
 Claude plays two roles through `llm/client.py`: the **orchestrator** and the **scorer**. The
 monitored Claude *target* is a separate adapter queried as an end-user; calls are tagged
 `ORCHESTRATOR` vs `TARGET` in the audit log.
+
+**Active targets (from `config/targets.yaml`):** `openai-gpt4o` → `gpt-4o-2024-08-06`,
+`google-gemini` → `gemini-2.5-flash`, `anthropic-claude-target` → `claude-sonnet-4-6`, and the
+Provider-only dev stand-in `provider-evidence-dev` (`active: true` in the committed config). The real
+`open-evidence` target is present but `active: false`.
+
+### The adapter seam — worked example: `provider-evidence-dev`
+
+Adding a target is a new adapter class + a `targets.yaml` entry + a registry mapping — the
+orchestrator never changes. `provider-evidence-dev` (ADR-0011) is the worked example. It is a
+**development stand-in** for the future Open Evidence Provider target — explicitly **NOT Open
+Evidence** and never reported as such — and it shows the seam handling a *composite* provider:
+
+1. Its `_call_live` queries public **PubMed E-utilities** (`esearch` → `efetch`) for the question
+   (NCBI `tool`/`email` from config; optional `api_key`), then
+2. calls the existing **Claude client** (orchestrator role) to synthesize a cited answer **from the
+   retrieved abstracts only**.
+
+The synthesized text plus a provenance footer (the PubMed query + the PMIDs used) is the captured
+response — recorded immutably and scored by the normal pipeline. It inherits the base adapter's
+retry/backoff and offline-mock behaviour, and a PubMed outage degrades to `FAILED` so the run
+continues. It is Provider-persona only and gated by the same `active`/persona rule as every target.
+
+**Where the real Open Evidence adapter slots in:** a future `open_evidence.py` adapter implementing
+the same protocol (their `createAnalysisStreaming` API — needs API key + org id + signed BAA + Legal/
+ToS sign-off) drops into this seam; activating it (and retiring/deactivating the dev stand-in) is a
+config + adapter change, no core change. Its credentials already have config slots
+(`OPENEVIDENCE_API_KEY`, `OPENEVIDENCE_ORG_ID`), required only when that target is `active`.
 
 ## 9. Scoring + the four alert rules
 

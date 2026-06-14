@@ -43,9 +43,18 @@ FastAPI process (ADR-0008).
 **In scope (POC):**
 - The **4 core components**: Question Repository, LLM Response Agent, Response Repository, Scoring
   & Alerting.
-- **3 public LLMs** — OpenAI GPT-4o, Google Gemini, and Anthropic Claude (queried as an end-user)
-  — **plus a conditional Open Evidence** target used only for Provider-persona questions and only
-  if API access is confirmed.
+- **3 public LLMs** — OpenAI GPT-4o, Google Gemini, and Anthropic Claude (queried as an end-user).
+  Model ids come from config (`src/evidence_monitor/config/targets.yaml`): `gpt-4o-2024-08-06`,
+  `gemini-2.5-flash`, `claude-sonnet-4-6`.
+- **Provider-persona Provider-evidence targets:**
+  - **Provider evidence (dev)** — a **development stand-in** that exercises the Provider pipeline
+    via public **PubMed** (E-utilities) retrieval + **Claude synthesis** of the retrieved abstracts.
+    It is **NOT Open Evidence**, its output is not Open Evidence's and will differ, and it must never
+    be reported as Open Evidence. Provider-persona only; enabled in the current config. See
+    [ADR-0011](docs/adr/0011-provider-evidence-dev-target.md).
+  - **Open Evidence** — the real conditional Provider target, **inactive / not yet built** (its
+    production API needs a key + org id + signed BAA via their sales process, plus Legal/ToS
+    sign-off). Its absence does not count against the capture rate.
 - The **162-question bank** (Patient 59 · Prospect 49 · Provider 54; across Immunology,
   Neuroscience, and Oncology).
 - **Local execution** — SQLite/DuckDB storage; a React dashboard served by FastAPI at
@@ -325,7 +334,7 @@ For each response, Claude returns a structured object (validated against a JSON 
 - **Python 3.11+**, managed with **uv**. **ruff** (format/lint), **pytest** (tests), **Pydantic** (schemas).
 - **FastAPI** for the local app — it serves the React SPA, the read-only `/api` + `/reports` JSON,
   the read-write `/approvals` endpoints, and `/health`.
-- **React + TypeScript + Tailwind** (Vite, Recharts, Inter) for the dashboard frontend (`frontend/`).
+- **React + TypeScript + Tailwind** (Vite, Recharts, Figtree base font) for the dashboard frontend (`frontend/`).
 - **LangGraph** for the explicit, code-defined orchestration graph (no autonomous agent loops).
 - **Anthropic API (Claude)** as orchestrator + scorer; **OpenAI** and **Google GenAI** SDKs for the
   monitored targets.
@@ -436,6 +445,25 @@ through the secret-redacting formatter, so a credential can never reach a log si
 The `approve`/`reject`/`approve-all-test-numbered`/`reset-to-pending` commands all go through the
 question-repository approval seam and append to the append-only audit log — never raw SQL.
 
+### Run the "Provider evidence (dev)" target
+
+`provider-evidence-dev` is the development stand-in for the future Open Evidence Provider target
+(PubMed retrieval + Claude synthesis). It is **NOT Open Evidence** and its output will differ —
+never report it as Open Evidence. It is **Provider-persona only** and, in the current committed
+config, `active: true` (set `active: false` in `targets.yaml` to disable it). It makes live network
+calls (PubMed E-utilities + Claude), so it needs `ANTHROPIC_API_KEY`; NCBI asks callers to identify
+themselves, so optionally set `EM_NCBI_EMAIL` (and `NCBI_API_KEY` for higher rate limits).
+
+```bash
+# Run it against ONE approved PROVIDER question (reliable — guarantees a Provider-persona question):
+uv run evidence-monitor subset --persona PROVIDER --target provider-evidence-dev --limit 1
+```
+
+`run --target provider-evidence-dev --limit 1` also works, but `--limit` picks the first approved
+questions by id regardless of persona, so use `subset --persona PROVIDER` to be sure one reaches a
+Provider-only target. The PubMed query and the PMIDs used are recorded in the response text as
+provenance; if PubMed is unreachable the record is marked `FAILED` and the run continues.
+
 ### Verify one provider at a time (smoke test)
 
 When bringing up live credentials, verify each provider with a **real** call before a full run —
@@ -493,6 +521,11 @@ cd frontend && npm run dev                             # terminal 2 → http://1
   capture. Next is the POC readout / acceptance validation.
 - **Acceptance:** a 7-day unattended run with zero interventions, ≥95% capture, and a dashboard
   stakeholders confirm is actionable.
+- **Real Open Evidence integration (pending, not built):** replace the `provider-evidence-dev`
+  stand-in with the real Open Evidence Provider adapter (their `createAnalysisStreaming` API), which
+  requires an API key + org id + a signed BAA via their sales process, plus Legal/ToS sign-off. It
+  slots in behind the existing `llm` adapter seam (a new adapter + a config flip), with no change to
+  core orchestration.
 - **Production (future):** SQLite → Aurora/DynamoDB, Anthropic API → Bedrock, local scheduler →
   EventBridge, behind the same seams.
 - **Vision (future, not POC):** GEO analysis, multi-agent architecture, literature-mining,
