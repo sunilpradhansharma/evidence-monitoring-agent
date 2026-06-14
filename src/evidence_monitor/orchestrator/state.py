@@ -17,12 +17,30 @@ from datetime import datetime
 
 from evidence_monitor.data_access.models import (
     Alert,
+    Domain,
     LLMTarget,
+    Persona,
     Question,
     ScoringRecord,
     TriggerType,
 )
 from evidence_monitor.response_repo.schema import Response
+
+
+@dataclass(frozen=True)
+class QuestionFilter:
+    """Optional subset selector for a run (CLI ``subset``) — matches on question facets only."""
+
+    persona: Persona | None = None
+    therapeutic_area: str | None = None
+    domain: Domain | None = None
+
+    def matches(self, q: Question) -> bool:
+        return (
+            (self.persona is None or q.persona is self.persona)
+            and (self.therapeutic_area is None or q.therapeutic_area == self.therapeutic_area)
+            and (self.domain is None or q.domain is self.domain)
+        )
 
 
 @dataclass
@@ -39,6 +57,8 @@ class RunSummary:
     failure_count: int
     alert_count: int
     total_tokens: int
+    est_cost: float
+    budget_exhausted: bool = False  # the run paused on the token budget before finishing the bank
 
 
 @dataclass
@@ -54,7 +74,8 @@ class RunState:
     scores: list[ScoringRecord] = field(default_factory=list)
     alerts: list[Alert] = field(default_factory=list)
     total_tokens: int = 0
+    budget_exhausted: bool = False  # set when the token budget is reached; stops further dispatch
     summary: RunSummary | None = None
 
 
-__all__ = ["RunState", "RunSummary"]
+__all__ = ["QuestionFilter", "RunState", "RunSummary"]

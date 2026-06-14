@@ -20,6 +20,7 @@ from evidence_monitor.llm.adapters.claude_target import ClaudeTargetAdapter
 from evidence_monitor.llm.adapters.gemini import GeminiAdapter
 from evidence_monitor.llm.adapters.open_evidence import OpenEvidenceAdapter
 from evidence_monitor.llm.adapters.openai_gpt4o import OpenAIGpt4oAdapter
+from evidence_monitor.observability.cost import TokenPrice
 
 # Provider id (structural, content-agnostic) → adapter class. Provider names are not regulated
 # content; brand/competitor/indication values never appear here (Principle IV).
@@ -44,6 +45,24 @@ def load_targets(config_path: str | Path) -> list[LLMTarget]:
     return targets
 
 
+def load_prices(config_path: str | Path) -> dict[str, TokenPrice]:
+    """Parse per-target token prices from config (``llm_name`` → :class:`TokenPrice`).
+
+    Prices are the one ``targets.yaml`` key not consumed by :class:`LLMTarget`; the cost tracker
+    reads them here so run-cost estimation stays config-driven (never hard-coded business data).
+    """
+    raw = yaml.safe_load(Path(config_path).read_text(encoding="utf-8")) or {}
+    prices: dict[str, TokenPrice] = {}
+    for entry in raw.get("targets", []):
+        price = entry.get("prices")
+        if price:
+            prices[entry["llm_name"]] = TokenPrice(
+                input_per_1k=float(price.get("input_per_1k", 0.0)),
+                output_per_1k=float(price.get("output_per_1k", 0.0)),
+            )
+    return prices
+
+
 def build_adapter(
     target: LLMTarget,
     *,
@@ -63,4 +82,4 @@ def targets_for_persona(targets: list[LLMTarget], persona: Persona) -> list[LLMT
     return [t for t in targets if t.active and t.serves(persona)]
 
 
-__all__ = ["build_adapter", "load_targets", "targets_for_persona"]
+__all__ = ["build_adapter", "load_prices", "load_targets", "targets_for_persona"]

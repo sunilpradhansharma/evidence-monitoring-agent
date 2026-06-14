@@ -20,6 +20,7 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from logging import Logger
 
 from evidence_monitor.alerts import rules
 from evidence_monitor.alerts.rules import AlertThresholds
@@ -34,8 +35,10 @@ from evidence_monitor.data_access.models import (
 from evidence_monitor.data_access.sqlite_store import SqliteStore
 from evidence_monitor.llm.adapters.base import LLMAdapter, MockBehavior
 from evidence_monitor.llm.registry import build_adapter, targets_for_persona
+from evidence_monitor.observability.cost import CostTracker, TokenPrice
+from evidence_monitor.observability.logging import get_logger, log_event
 from evidence_monitor.orchestrator.run_manager import RunManager
-from evidence_monitor.orchestrator.state import RunState, RunSummary
+from evidence_monitor.orchestrator.state import QuestionFilter, RunState, RunSummary
 from evidence_monitor.response_repo.repository import ResponseService
 from evidence_monitor.response_repo.schema import Response
 from evidence_monitor.scoring.scorer import Scorer
@@ -62,6 +65,10 @@ class OrchestratorContext:
     mock: bool = True
     mock_behavior: MockBehavior = MockBehavior.SUCCESS
     resume_run_id: str | None = None
+    prices: dict[str, TokenPrice] = field(default_factory=dict)
+    max_tokens_per_run: int = 0  # 0 = unlimited; otherwise pause the run when reached
+    question_filter: QuestionFilter | None = None  # CLI subset selector
+    logger: Logger | None = None
 
     def __post_init__(self) -> None:
         # Build one adapter per target up front (OFFLINE/MOCK so runs need no network or key).
@@ -70,6 +77,8 @@ class OrchestratorContext:
             for t in self.targets
         }
         self.responses = ResponseService(self.store.responses)
+        self.cost = CostTracker(prices=self.prices)  # run-cost estimate (FR-026)
+        self._log = self.logger or get_logger("evidence_monitor.orchestrator")
 
 
 def build_nodes(ctx: OrchestratorContext) -> dict[str, Callable]:
@@ -95,8 +104,10 @@ def build_nodes(ctx: OrchestratorContext) -> dict[str, Callable]:
         return {"run_id": run.run_id, "targets": ctx.targets}
 
     def load_questions(state: RunState) -> dict:
-        """Load the APPROVED + active question set and the resume cursor (FR-003, IX)."""
+        """Load the APPROVED + active question set (optionally a subset) and the resume cursor."""
         questions = ctx.store.questions.approved_active()
+        if ctx.question_filter is not None:
+            questions = [q for q in questions if ctx.question_filter.matches(q)]
         cursor = (
             ctx.run_manager.resume_point(state.run_id, questions)
             if ctx.resume_run_id is not None
@@ -105,8 +116,10 @@ def build_nodes(ctx: OrchestratorContext) -> dict[str, Callable]:
         return {"questions": questions, "cursor": cursor}
 
     def more_questions(state: RunState) -> str:
-        """Loop predicate: dispatch the next question, or fall through to scoring."""
-        return _DISPATCH if state.cursor < len(state.questions) else _DONE
+        """Loop predicate: dispatch the next question, unless the bank is done or budget spent."""
+        if state.budget_exhausted or state.cursor >= len(state.questions):
+            return _DONE
+        return _DISPATCH
 
     def dispatch_question(state: RunState) -> dict:
         """Submit ONE question to every eligible target, persist each response, checkpoint."""
@@ -157,15 +170,33 @@ def build_nodes(ctx: OrchestratorContext) -> dict[str, Callable]:
                     detail=str(result.status),
                 )
             )
+            ctx.cost.record(target.llm_name, output_tokens=result.response_tokens)
             new_responses.append(response)
             tokens += result.response_tokens
 
         # Checkpoint AFTER all of this question's responses are persisted (Principle IX).
         ctx.run_manager.checkpoint(state.run_id, question.question_id)
+
+        total_tokens = state.total_tokens + tokens
+        # Enforce the per-run token budget: pause (don't dispatch further) and notify rather than
+        # overrun. The run stays resumable from the checkpoint just written.
+        exhausted = ctx.cost.over_budget(ctx.max_tokens_per_run)
+        if exhausted:
+            remaining = len(state.questions) - (state.cursor + 1)
+            log_event(
+                ctx._log,
+                "WARNING",
+                "run paused: token budget reached",
+                run_id=state.run_id,
+                total_tokens=total_tokens,
+                max_tokens_per_run=ctx.max_tokens_per_run,
+                questions_remaining=remaining,
+            )
         return {
             "responses": state.responses + new_responses,
             "cursor": state.cursor + 1,
-            "total_tokens": state.total_tokens + tokens,
+            "total_tokens": total_tokens,
+            "budget_exhausted": exhausted,
         }
 
     def score_batch(state: RunState) -> dict:
@@ -184,6 +215,7 @@ def build_nodes(ctx: OrchestratorContext) -> dict[str, Callable]:
                 continue  # already scored — idempotent, and covers resume
             scored = ctx.scorer.score(response)
             stored = ctx.store.scores.add_version(scored.record)
+            ctx.cost.record(scored.record.scorer_model, output_tokens=scored.tokens)
             new_scores.append(stored)
             tokens += scored.tokens
         return {"scores": state.scores + new_scores, "total_tokens": state.total_tokens + tokens}
@@ -225,6 +257,8 @@ def build_nodes(ctx: OrchestratorContext) -> dict[str, Callable]:
             failure_count=failures,
             alert_count=len(state.alerts),
             total_tokens=state.total_tokens,
+            est_cost=round(ctx.cost.est_cost, 6),
+            budget_exhausted=state.budget_exhausted,
         )
         ctx.run_manager.finalize(
             state.run_id,
@@ -233,7 +267,7 @@ def build_nodes(ctx: OrchestratorContext) -> dict[str, Callable]:
                 responses_captured=captured,
                 failure_count=failures,
                 total_tokens=state.total_tokens,
-                est_cost=0.0,
+                est_cost=summary.est_cost,
             ),
         )
         ctx.store.audit.append(
