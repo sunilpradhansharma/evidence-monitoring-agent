@@ -7,7 +7,7 @@
 Beyond sentiment and competitive positioning, a distinct and serious failure mode is when an LLM
 answers a question with content about the **wrong disease/indication** — effectively routing a
 prospect, patient, or provider to information for a condition they did not ask about. This risk was
-surfaced by the AbbVie **GEO (generative-engine-optimization) findings deck**
+surfaced by the **GEO (generative-engine-optimization) findings deck**
 (`docs/GEO-Deck-to-POC-Mapping.md`, traced source). It is not captured by a sentiment score or a
 competitive-position label.
 

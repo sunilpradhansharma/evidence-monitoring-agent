@@ -1,6 +1,11 @@
 # ADR-0005: Combined Reports + Approvals UI, local-only, approver-name, no RBAC
 
-**Status:** Accepted (2026-06-13)
+**Status:** Accepted (2026-06-13). **UI-rendering portion superseded by
+[ADR-0008](0008-react-spa-over-fastapi-readonly-api.md)** — the primary UI is now a React SPA served
+by FastAPI over read-only `/api` endpoints, and the original server-rendered (Jinja) UI is retained
+at `/html`. The decisions below that remain **in force**: a single local-only app, `approver_name`
+attribution, no RBAC, and that the only outward action the app can take is changing a question's
+approval status (it never submits a question to an LLM).
 
 ## Context
 

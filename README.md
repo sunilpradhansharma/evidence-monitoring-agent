@@ -1,19 +1,21 @@
 # Evidence Monitoring Agent
 
 A local, spec-driven proof-of-concept that monitors how public large language models (LLMs)
-represent AbbVie therapies versus competitors when asked realistic prospect, patient, and
+represent the sponsor's therapies versus competitors when asked realistic prospect, patient, and
 provider questions. It **only captures and scores** — it never gives medical advice, contacts
 anyone, or takes any outward action — and a **human approves every question before it is ever
 submitted** to an LLM. The output is a queryable record of what each model said, an explainable
-score for each response, threshold-based alerts on concerning answers, and a simple dashboard for
+score for each response, threshold-based alerts on concerning answers, and a **React dashboard** for
 Medical Affairs and Commercial.
 
 ## Status
 
-**Design complete · build in progress.** This project is **spec-first**: the specification,
-plan, data model, and task breakdown were written and reviewed before any application code. It
-**runs locally** — Claude (via the Anthropic API) acts as both the orchestrator and the scorer,
-with all model ids sourced from config. Amazon Bedrock is the documented production swap.
+**Implementation complete and committed · POC readout/acceptance pending.** This project is
+**spec-first**: the specification, plan, data model, and task breakdown were written and reviewed
+before any application code. It **runs locally** — Claude (via the Anthropic API) acts as both the
+orchestrator and the scorer, with all model ids sourced from config. Amazon Bedrock is the
+documented production swap. The dashboard is a React + Tailwind single-page app served by the same
+FastAPI process (ADR-0008).
 
 ➡️ Living status, phase roadmap, and decisions log: **[docs/project-status.md](docs/project-status.md)**
 
@@ -28,8 +30,11 @@ with all model ids sourced from config. Amazon Bedrock is the documented product
   status of `SUCCESS / FAILED / TRUNCATED / BLOCKED` and full metadata; records are queryable.
 - **Scoring + Alerts** — Claude produces a structured score per response; deterministic code
   decides which responses raise an alert.
-- **Combined Reports + Approvals UI** — one local-only app: read-only Reports for stakeholders and
-  read-write Approvals for Medical Affairs.
+- **React dashboard + read-only `/api`** — a Vite/TypeScript/Tailwind single-page app served by
+  FastAPI at one local URL: read-only Reports for stakeholders (run selector, coverage heatmap,
+  sentiment chart, citation panel, alerts) over `/api/*` JSON endpoints that reuse the existing
+  aggregation, plus read-write **Approvals** for Medical Affairs. The legacy server-rendered UI is
+  retained at `/html`.
 - **Scheduling + Audit** — a daily run on a cron/scheduler, plus an append-only audit log of every
   query and response for compliance.
 
@@ -43,7 +48,9 @@ with all model ids sourced from config. Amazon Bedrock is the documented product
   if API access is confirmed.
 - The **162-question bank** (Patient 59 · Prospect 49 · Provider 54; across Immunology,
   Neuroscience, and Oncology).
-- **Local execution** — SQLite/DuckDB storage, a self-contained HTML dashboard, no cloud services.
+- **Local execution** — SQLite/DuckDB storage; a React dashboard served by FastAPI at
+  `http://127.0.0.1:8000` (plus CSV/JSON export and a self-contained static HTML export); no cloud
+  services.
 
 **Out of scope (POC):** any private/internal model; production data-platform integrations (Veeva,
 Salesforce, data lake); real-time notification pipelines; user auth / RBAC / multi-tenant; mobile
@@ -71,6 +78,10 @@ In brief:
 
 All diagrams live in [`docs/diagrams/`](docs/diagrams/). Each one below is followed by a plain-language,
 step-by-step walkthrough so a non-engineer can follow the flow.
+
+> **Note:** these diagrams predate the React dashboard (ADR-0008) and depict the dashboard
+> generically as "Dashboard (HTML)". The capture → score → alert pipeline they show is unchanged;
+> only the UI rendering moved to a React SPA served by FastAPI over the read-only `/api` layer.
 
 ### 1. System context
 
@@ -293,7 +304,7 @@ without re-submitting. Every external call is written to an **append-only audit 
 
 For each response, Claude returns a structured object (validated against a JSON schema):
 
-- `sentiment_score` — `−1.0 … +1.0` toward the AbbVie therapy.
+- `sentiment_score` — `−1.0 … +1.0` toward our therapy.
 - `competitive_position` — `FIRST_LINE_RECOMMENDED | AMONG_OPTIONS | SECOND_LINE | NOT_RECOMMENDED | NOT_MENTIONED`.
 - `citation_status` — `CITED | PARTIAL | ABSENT | WRONG_INDICATION`, where **WRONG_INDICATION**
   means the model returned content for the **wrong disease/indication** (a person routed to
@@ -306,13 +317,15 @@ For each response, Claude returns a structured object (validated against a JSON 
 
 1. `sentiment_score` below the negative threshold (default **−0.3**, configurable).
 2. `competitive_position` is `NOT_RECOMMENDED`.
-3. A competitor brand has sentiment **≥0.3 higher** than the AbbVie therapy in the same response.
+3. A competitor brand has sentiment **≥0.3 higher** than our therapy in the same response.
 4. `citation_status` is `WRONG_INDICATION` → **highest-severity** alert.
 
 ## Tech stack
 
 - **Python 3.11+**, managed with **uv**. **ruff** (format/lint), **pytest** (tests), **Pydantic** (schemas).
-- **FastAPI** for the local Reports + Approvals app.
+- **FastAPI** for the local app — it serves the React SPA, the read-only `/api` + `/reports` JSON,
+  the read-write `/approvals` endpoints, and `/health`.
+- **React + TypeScript + Tailwind** (Vite, Recharts, Inter) for the dashboard frontend (`frontend/`).
 - **LangGraph** for the explicit, code-defined orchestration graph (no autonomous agent loops).
 - **Anthropic API (Claude)** as orchestrator + scorer; **OpenAI** and **Google GenAI** SDKs for the
   monitored targets.
@@ -331,7 +344,7 @@ For each response, Claude returns a structured object (validated against a JSON 
 │   ├── SRS.pdf                   # Software Requirements Specification (source of scope)
 │   ├── technical-architecture.md # Architecture, invariants, data model, ADR index, prod swap
 │   ├── project-status.md         # LIVING status: phases, decisions, open items, how to resume
-│   ├── adr/                      # Architecture Decision Records (0001–0007)
+│   ├── adr/                      # Architecture Decision Records (0001–0010)
 │   └── diagrams/                 # System, pipeline, orchestrator, ERD, sequence, etc.
 ├── specs/001-evidence-monitoring-poc/
 │   ├── spec.md  plan.md  research.md  data-model.md  tasks.md  quickstart.md
@@ -339,8 +352,10 @@ For each response, Claude returns a structured object (validated against a JSON 
 │   └── checklists/requirements.md
 ├── src/evidence_monitor/         # Package code (built per tasks.md)
 │   ├── config/ data_access/ llm/ question_repo/ response_repo/
-│   ├── scoring/ alerts/ orchestrator/ dashboard/ observability/
-│   ├── scheduler.py  cli.py  api.py
+│   ├── scoring/ alerts/ orchestrator/ observability/
+│   ├── dashboard/                # render.py (aggregation), json_api.py (read-only /api), legacy templates
+│   ├── scheduler.py  cli.py  api.py   # api.py serves the React SPA + /api + /reports + /approvals + /health
+├── frontend/                     # React + TS + Tailwind SPA (Vite); builds to frontend/dist/ (git-ignored)
 └── .specify/memory/constitution.md
 ```
 
@@ -438,26 +453,44 @@ both worked for that target (a `[FAILED] … — <ErrorClass>` line shows the no
 `ANTHROPIC_API_KEY` first — once it works, the `openai-gpt4o` / `google-gemini` smoke tests both
 capture and score.
 
-### Local console (Reports + Approvals)
+### Dashboard (React SPA + Approvals)
+
+**Build once, then serve — one URL, one process:**
 
 ```bash
-uv run uvicorn evidence_monitor.api:app     # serves http://127.0.0.1:8000 (local-only, no auth)
+cd frontend && npm install && npm run build && cd ..   # builds frontend/dist/
+uv run uvicorn evidence_monitor.api:app                # http://127.0.0.1:8000 (local-only, no auth)
 ```
 
-- **Reports tab** (`/?tab=reports`) — read-only sentiment / competitive-positioning / alerts / volume.
-  Scope the view with the **Run** dropdown (or the date range) — e.g. pick today's clean run so a
-  demo shows only good data while older debugging runs stay retained and auditable (nothing is
-  deleted). Direct link: `/?tab=reports&run_id=<run_id>`.
-- **Approvals tab** (`/?tab=approvals`) — the PENDING queue with approve/reject controls, plus a
-  read-only **“Approved questions (N)”** view of every APPROVED + active question (id, persona,
-  therapeutic area, brand focus, domain, status, approver, note, version, updated, full text),
-  filterable by persona / therapeutic area / domain and a free-text search, sorted by `question_id`.
+The built SPA is served at `/`. (If `frontend/dist/` is absent, `/` falls back to the legacy
+server-rendered HTML, so the backend still runs without a frontend build.)
+
+**Frontend development (hot reload):** run the backend, then Vite in another terminal — it proxies
+`/api`, `/approvals`, and `/health` to the backend:
+
+```bash
+uv run uvicorn evidence_monitor.api:app                # terminal 1 (backend, port 8000)
+cd frontend && npm run dev                             # terminal 2 → http://127.0.0.1:5173
+```
+
+- **Reports** (client route `/`) — run selector (defaults to the latest run), headline, metric
+  cards, the question × model coverage heatmap, a sentiment chart, the citation-status panel,
+  competitive positioning, and the alerts list. Click a coverage cell or alert to open the full
+  response + scoring rationale. Backed by read-only `GET /api/runs`, `GET /api/runs/{id}/report`,
+  and `GET /api/responses/{id}`.
+- **Approvals** (client route `/approvals`) — the **only** writes. A reviewer-name field (Approve/
+  Reject disabled until filled), the PENDING queue grouped by persona, and read-only Approved/
+  Rejected tables (version-aware: each question appears once). Reads `GET /api/questions`; writes go
+  through the existing audited `POST /approvals/questions/{id}/approve|reject|edit`.
+- **Endpoints:** read-only JSON under `/api/*` and `/reports/*` (incl. `GET /reports/export` for
+  CSV/JSON); writes only under `/approvals/*`; `/health` for the credential preflight; the legacy
+  server-rendered UI at `/html`.
 
 ## Roadmap
 
-- **Now:** POC build complete (per `tasks.md`) — capture & store → scoring → approval gate →
-  alerts → dashboard, with an offline e2e suite asserting ≥95% capture. Next is the POC readout /
-  acceptance validation.
+- **Now:** POC build complete and committed (per `tasks.md`) — capture & store → scoring → approval
+  gate → alerts → React dashboard + read-only `/api`, with an offline e2e suite asserting ≥95%
+  capture. Next is the POC readout / acceptance validation.
 - **Acceptance:** a 7-day unattended run with zero interventions, ≥95% capture, and a dashboard
   stakeholders confirm is actionable.
 - **Production (future):** SQLite → Aurora/DynamoDB, Anthropic API → Bedrock, local scheduler →

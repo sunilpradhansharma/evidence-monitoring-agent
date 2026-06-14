@@ -36,6 +36,9 @@ These hold at all times and are enforced in code (and checked by the `constituti
 - **Responses are write-once.** The Response repository raises on any update attempt.
 - **Scores never mutate responses.** A score is a separate, versioned `Scoring_Record` linked by
   `response_id`; re-scoring adds a version.
+- **Question counts are version-aware.** Questions are versioned (edits/approvals append a new
+  version, never overwrite); every count and list uses the **latest version per `question_id`**, so
+  a question is counted once regardless of its edit history (ADR-0009).
 - **Alerts are decided by code, never by the model.**
 - **Model ids, parameters, rate limits, thresholds, cron, and token budget come from config.**
 - **Brand/competitor/indication names appear only in the question bank and config — never in code.**
@@ -53,9 +56,12 @@ Full records in [`docs/adr/`](adr/):
 | [0002](adr/0002-local-first-with-production-swap.md) | Local-first POC with production swap behind seams |
 | [0003](adr/0003-llm-scores-code-decides.md) | LLM scores; deterministic code decides alerts |
 | [0004](adr/0004-immutable-responses-versioned-scores.md) | Immutable responses + versioned scoring records |
-| [0005](adr/0005-combined-local-ui.md) | Combined Reports + Approvals UI, local-only, approver-name, no RBAC |
+| [0005](adr/0005-combined-local-ui.md) | Combined Reports + Approvals UI, local-only, approver-name, no RBAC *(UI-rendering portion superseded by ADR-0008)* |
 | [0006](adr/0006-citation-status-wrong-indication.md) | `citation_status` with `WRONG_INDICATION` + highest-severity alert |
 | [0007](adr/0007-offline-e2e-capture-rate-and-cli-preflight.md) | Offline e2e capture-rate gate + CLI credential preflight |
+| [0008](adr/0008-react-spa-over-fastapi-readonly-api.md) | React SPA primary UI, served by FastAPI over a read-only `/api` layer reusing `render.py` |
+| [0009](adr/0009-version-aware-question-counts.md) | Version-aware question counts (latest version per `question_id`) |
+| [0010](adr/0010-gemini-thinking-disabled.md) | Disable Gemini "thinking" + pin a current model id (config + adapter) |
 
 ## 4. Module / package map
 
@@ -73,12 +79,26 @@ src/evidence_monitor/
 ├── scoring/        scorer.py (structured JSON), prompts.py (MA-reviewed prompt)
 ├── alerts/         rules.py (4 deterministic rules incl. wrong-indication)
 ├── orchestrator/   state.py, nodes.py, graph.py (LangGraph), run_manager.py (run_id, resume, checkpoint)
-├── dashboard/      render.py (self-contained HTML + CSV/JSON), template.html
+├── dashboard/      render.py (aggregation → legacy HTML + self-contained export + CSV/JSON),
+│                   json_api.py (read-only JSON serializers reusing render.py — no new aggregation),
+│                   template.html / reports_section.html / _styles.html (legacy server-rendered UI)
 ├── observability/  logging.py (structured JSON + secret redaction), cost.py (tokens + $)
 ├── scheduler.py    cron / APScheduler entry
-├── cli.py          run / dry-run / subset / health-check
-└── api.py          FastAPI: read-only Reports + read-write Approvals + /health
+├── cli.py          import-questions / run / subset / dry-run / health-check / approve / reject
+│                   (+ test helpers: approve-all-test-numbered, reset-to-pending)
+└── api.py          FastAPI: React SPA at "/", read-only /api/* JSON, /reports/* JSON + export,
+                    read-write /approvals/* (the only writes), /health, legacy HTML at /html
+
+frontend/           React + TypeScript SPA (Vite, Tailwind, Recharts, Inter via @fontsource).
+                    Builds to frontend/dist/ (git-ignored); FastAPI serves it at "/".
 ```
+
+> **UI note.** The **primary UI is a React single-page app** (ADR-0008) served by FastAPI from the
+> built static files at `http://127.0.0.1:8000`. It reads the read-only `/api/*` endpoints and
+> writes only via the existing `/approvals/*` POSTs. The original server-rendered (Jinja) UI is
+> retained at `/html`; when no frontend build is present, `/` falls back to it. The pipeline
+> diagrams below predate the React rewrite and depict the dashboard generically — the capture →
+> score → alert pipeline they show is unchanged.
 
 ## 5. The `data_access` seam
 
@@ -89,6 +109,38 @@ All persistence goes through protocols in `data_access/interface.py`
 SQLite implementation can be replaced by an Aurora/DynamoDB one without touching business logic.
 The seam is where immutability, versioning, append-only audit, and soft-delete/retention are
 **enforced**, not merely encouraged.
+
+## 5a. Web layer — React SPA + FastAPI + read-only `/api` (ADR-0008)
+
+One FastAPI app (`api.py`) is the whole web layer; there is no separate backend service.
+
+- **React SPA (primary UI).** `frontend/` is a Vite + TypeScript + Tailwind app (Recharts for the
+  sentiment chart, Inter via `@fontsource/inter`). `npm run build` emits static files to
+  `frontend/dist/`. FastAPI serves them: hashed assets at `/assets`, and `index.html` at `/` and as
+  the fallback for unknown client-side routes (registered **last** so it never shadows an API/HTML
+  route). With no build present, `/` serves the legacy HTML instead, so the suite and a fresh
+  checkout still work without Node.
+- **Read-only `/api` layer.** `dashboard/json_api.py` serializes exactly what `render.py` already
+  computes — **no new aggregation**:
+  - `GET /api/runs` — runs for the selector (id, timestamps, captured/fail counts).
+  - `GET /api/runs/{run_id}/report` — the full Reports payload for one run: headline, run metrics
+    (responses/success/truncated/failed/blocked, capture rate vs ≥95%, alerts + by-type, scope,
+    cost, tokens, duration), the question × model coverage matrix (per-cell status class, label,
+    `truncated`, `response_id`), sentiment-by-model and -therapy, citation counts, the positioning
+    table, and the alerts list. Counts are version-aware and run-scoped exactly as the HTML view.
+  - `GET /api/questions?status=&persona=` — version-aware questions (latest per `question_id`) plus
+    global status counts (pending/approved/rejected/total).
+  - `GET /api/responses/{response_id}` — full response text + scoring rationale for click-through.
+- **Legacy/JSON Reports endpoints retained.** `GET /reports/responses`, `/reports/responses/{id}`,
+  `/reports/alerts`, `/reports/export` (CSV/JSON), `/reports/runs/{id}/summary`, and the legacy HTML
+  at `/html`.
+- **The only writes** remain `POST /approvals/questions/{id}/approve|reject|edit` — audit-logged,
+  through the question-repo approval seam. The SPA calls these directly; no write path was added.
+  (`POST /score-review/{id}` exists but is disabled in this build and returns 404.)
+- **Data flow (read).** SPA → `GET /api/runs` (default to latest) → `GET /api/runs/{id}/report` →
+  render; a coverage cell or alert opens `GET /api/responses/{id}` in a side panel. **Data flow
+  (write).** Approvals tab → `POST /approvals/.../approve|reject` (reviewer name required) → the
+  approval seam writes a new question version + an audit entry → the SPA re-fetches `/api/questions`.
 
 ## 6. Data model
 
@@ -124,6 +176,10 @@ Every target implements the adapter protocol in `llm/adapters/base.py`
 - **Rate limiting** — per-target `rpm`/`tpm` limits from config.
 - **Status mapping** — length cap → `TRUNCATED`; safety/filter block → `BLOCKED` (distinct from
   `FAILED`, important for Gemini).
+- **Provider quirks live in the adapter.** Gemini is a *thinking* model whose hidden reasoning
+  tokens count against `max_output_tokens`; the adapter sets `thinking_budget=0` so the whole budget
+  goes to the visible answer (with a modest `max_tokens` bump in config), which we score. This is a
+  config + adapter concern only — core logic is untouched (ADR-0010).
 - **Offline/mock mode** — deterministic canned results with no network call, so e2e and
   capture-rate tests are fast and repeatable.
 - **Config-sourced** — model ids/params/endpoints are never hard-coded. Adding a target is a new
@@ -144,7 +200,7 @@ The scorer (`scoring/scorer.py`) returns a JSON object validated against
 
 1. `sentiment_score` < negative threshold (default **−0.3**).
 2. `competitive_position` == `NOT_RECOMMENDED`.
-3. competitor brand sentiment ≥ **0.3** higher than the AbbVie therapy in the same response.
+3. competitor brand sentiment ≥ **0.3** higher than our therapy in the same response.
 4. `citation_status` == `WRONG_INDICATION` → **highest severity**.
 
 ## 10. Explainability
@@ -179,9 +235,14 @@ than trust it blindly (Constitution VII).
   token budget; runs the credential preflight.
 - `config/targets.yaml` — targets, model versions, parameters, rate limits, personas served, ToS
   acknowledgment.
-- Entry points: `cli.py` (`run` / `import-questions` / `dry-run` / `subset` / `health-check` /
-  `approve` / `reject`; a live `run`/`subset` runs the credential preflight first), `scheduler.py`
-  (daily cron), `api.py` (Reports + Approvals + `/health`).
+- Entry points: `cli.py` (`import-questions` / `run` / `subset` / `dry-run` / `health-check` /
+  `approve` / `reject`, plus the test helpers `approve-all-test-numbered` / `reset-to-pending`; a
+  live `run`/`subset` runs the credential preflight first), `scheduler.py` (daily cron), `api.py`
+  (the React SPA at `/`, read-only `/api/*` and `/reports/*`, read-write `/approvals/*`, `/health`,
+  and the legacy HTML at `/html`).
+- Frontend build: `cd frontend && npm install && npm run build` produces `frontend/dist/`, which
+  `api.py` serves at `/`. For development, `npm run dev` runs a Vite server that proxies `/api`,
+  `/approvals`, and `/health` to the FastAPI backend.
 
 ## 14. POC → production
 
@@ -193,6 +254,6 @@ The seams make production a configuration/implementation swap, not a rewrite (Co
 | Claude (orchestrator + scorer) | Anthropic API | **Amazon Bedrock** | `llm/client.py` + config |
 | Scheduling | APScheduler / cron | **Amazon EventBridge Scheduler** | `scheduler.py` |
 | Orchestration runtime | local process | **Fargate** + **Step Functions** | deployment + `run_manager` |
-| Dashboard / exports | local HTML files | **Amazon S3** | `dashboard/render.py` |
+| Dashboard / exports | React SPA + `/api` served by FastAPI; CSV/JSON via `/reports/export` | **Amazon S3 / CloudFront** (static SPA) + the API behind ALB/Fargate | `frontend/` build + `api.py` |
 | Logs / metrics | structured JSON files | **CloudWatch** | `observability/logging.py` |
 | Secrets | env / `.env` | **AWS Secrets Manager** | `config/settings.py` |
