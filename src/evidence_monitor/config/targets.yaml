@@ -30,7 +30,11 @@ targets:
     model_version: gemini-2.5-flash
     endpoint: null
     temperature: 0.0
-    max_tokens: 1024
+    # gemini-2.5-flash is a thinking model: its internal thinking tokens are billed as output and
+    # count against max_output_tokens. A 1024 cap (fine for GPT-4o/Claude) leaves too little for
+    # the visible answer after thinking, so replies finish at MAX_TOKENS → TRUNCATED. Raised so
+    # thinking + a complete answer both fit (bump-and-retry can double this once, up to the 8192 cap).
+    max_tokens: 4096
     rpm_limit: 60
     tpm_limit: 90000
     personas: [PROSPECT, PROVIDER, PATIENT]

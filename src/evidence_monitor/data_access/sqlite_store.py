@@ -426,6 +426,11 @@ class _RunRepo:
         row = self._conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
         return _row_to_run(row) if row else None
 
+    def list(self) -> list[Run]:
+        """All runs, most-recent first (read-only; powers the Reports run-scope dropdown)."""
+        rows = self._conn.execute("SELECT * FROM runs ORDER BY started_at DESC").fetchall()
+        return [_row_to_run(r) for r in rows]
+
 
 class _ScoringRepo:
     def __init__(self, conn: sqlite3.Connection) -> None:

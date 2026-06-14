@@ -180,6 +180,10 @@ class RunRepository(Protocol):
 
     def get(self, run_id: str) -> Run | None: ...
 
+    def list(self) -> list[Run]:
+        """All runs, most-recent first (read-only; used to scope Reports to a chosen run)."""
+        ...
+
 
 @runtime_checkable
 class AuditWriter(Protocol):

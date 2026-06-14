@@ -30,6 +30,7 @@ from evidence_monitor.data_access.models import (
     Domain,
     Persona,
     Question,
+    Run,
     ScoringRecord,
 )
 from evidence_monitor.question_repo.repository import QuestionService
@@ -108,6 +109,7 @@ class ReportData:
     volume_by_date: dict[str, int]
     filters: dict[str, str]
     options: ReportOptions
+    runs: list[Run] = field(default_factory=list)  # for the Run-scope dropdown (most-recent first)
 
     # The enum order is the canonical column order for the competitive-positioning table.
     position_order: tuple[str, ...] = tuple(p.value for p in CompetitivePosition)
@@ -194,12 +196,14 @@ def build_report(store: DataAccess, filters: QueryFilters | None = None) -> Repo
         volume_by_date=dict(sorted(volume_by_date.items())),
         filters={k: v for k, v in _filter_echo(filters).items() if v},
         options=_options(store),
+        runs=store.runs.list(),
     )
 
 
 def _filter_echo(filters: QueryFilters) -> dict[str, str]:
     """The applied filter values, as strings, for echoing into the form / static header."""
     return {
+        "run_id": filters.run_id or "",
         "persona": str(filters.persona) if filters.persona else "",
         "therapeutic_area": filters.therapeutic_area or "",
         "llm": filters.llm or "",

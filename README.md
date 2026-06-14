@@ -445,6 +445,9 @@ uv run uvicorn evidence_monitor.api:app     # serves http://127.0.0.1:8000 (loca
 ```
 
 - **Reports tab** (`/?tab=reports`) — read-only sentiment / competitive-positioning / alerts / volume.
+  Scope the view with the **Run** dropdown (or the date range) — e.g. pick today's clean run so a
+  demo shows only good data while older debugging runs stay retained and auditable (nothing is
+  deleted). Direct link: `/?tab=reports&run_id=<run_id>`.
 - **Approvals tab** (`/?tab=approvals`) — the PENDING queue with approve/reject controls, plus a
   read-only **“Approved questions (N)”** view of every APPROVED + active question (id, persona,
   therapeutic area, brand focus, domain, status, approver, note, version, updated, full text),

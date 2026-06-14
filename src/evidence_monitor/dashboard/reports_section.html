@@ -5,6 +5,16 @@
 {% if interactive %}
 <form class="filters" method="get" action="/">
   <input type="hidden" name="tab" value="reports" />
+  <label>Run
+    <select name="run_id">
+      <option value="">All runs</option>
+      {% for r in data.runs %}
+      <option value="{{ r.run_id }}" {% if data.filters.run_id == r.run_id %}selected{% endif %}>
+        {{ r.run_id[:8] }}… · {{ r.started_at.strftime("%Y-%m-%d %H:%M") if r.started_at.strftime is defined else r.started_at }} · {{ r.responses_captured }} ok / {{ r.failure_count }} fail
+      </option>
+      {% endfor %}
+    </select>
+  </label>
   <label>Persona
     <select name="persona">
       <option value="">All</option>
