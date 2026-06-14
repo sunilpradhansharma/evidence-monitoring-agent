@@ -10,6 +10,7 @@ import {
 } from "recharts";
 import type { SentimentRow } from "../../api";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
+import { targetLabel } from "../../targets";
 
 const POS = "#0F6E56";
 const NEG = "#A32D2D";
@@ -24,7 +25,11 @@ function color(v: number): string {
 export default function SentimentChart({ rows }: { rows: SentimentRow[] }) {
   const reduced = useReducedMotion();
   if (!rows.length) return <p className="italic text-ink-soft">No scored responses in view.</p>;
-  const data = rows.map((r) => ({ name: r.name, value: Number(r.average.toFixed(2)), count: r.count }));
+  const data = rows.map((r) => ({
+    name: targetLabel(r.name),
+    value: Number(r.average.toFixed(2)),
+    count: r.count,
+  }));
   const height = Math.max(120, data.length * 56);
 
   return (

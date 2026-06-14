@@ -49,6 +49,14 @@ class Settings(BaseSettings):
     # --- Model + orchestration (ids come only from config, Principle V) ---
     claude_model_id: str = Field(default="claude-opus-4-6", validation_alias="CLAUDE_MODEL_ID")
 
+    # --- NCBI E-utilities (PubMed) — used ONLY by the optional dev target 'provider-evidence-dev'
+    #     (a dev stand-in for the future Open Evidence Provider target). NCBI asks callers to
+    #     identify via `tool` + `email`; an api_key is optional (higher rate limits only). Basic
+    #     access needs no key, so none of these is a required credential. ---
+    ncbi_tool: str = Field(default="evidence-monitoring-agent", validation_alias="EM_NCBI_TOOL")
+    ncbi_email: str = Field(default="", validation_alias="EM_NCBI_EMAIL")
+    ncbi_api_key: SecretStr | None = Field(default=None, validation_alias="NCBI_API_KEY")
+
     # --- Storage + scheduling ---
     db_path: str = Field(default="./data/evidence.db", validation_alias="EM_DB_PATH")
     schedule_cron: str = Field(default="0 2 * * *", validation_alias="EM_SCHEDULE_CRON")
@@ -125,9 +133,7 @@ def credential_preflight(settings: Settings, targets: list | None = None) -> lis
 
         targets = load_targets(settings.targets_config_path)
     return [
-        env
-        for field, env in required_credentials(targets)
-        if _is_blank(getattr(settings, field))
+        env for field, env in required_credentials(targets) if _is_blank(getattr(settings, field))
     ]
 
 

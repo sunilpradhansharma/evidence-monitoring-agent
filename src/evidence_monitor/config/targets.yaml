@@ -75,3 +75,23 @@ targets:
     prices:
       input_per_1k: 0.0
       output_per_1k: 0.0
+
+  # OPTIONAL development stand-in for the Open Evidence Provider target (PubMed + Claude synthesis);
+  # NOT Open Evidence; not for stakeholder reporting until replaced by the real Open Evidence API
+  # adapter. Provider-persona only, inactive by default. Step 1 searches public PubMed E-utilities
+  # for the question; step 2 has Claude synthesize a cited answer from those abstracts. Output will
+  # differ from Open Evidence's own and exists only to exercise the Provider pipeline.
+  - target_id: provider-evidence-dev
+    llm_name: provider-evidence-dev
+    model_version: pubmed-eutils+claude-synthesis
+    endpoint: null
+    temperature: 0.0
+    max_tokens: 1024
+    rpm_limit: 60  # NCBI policy: ~3 requests/sec without an api_key; one submit = 2 calls
+    tpm_limit: 90000
+    personas: [PROVIDER]
+    active: true
+    tos_acknowledged: true
+    prices:
+      input_per_1k: 0.0
+      output_per_1k: 0.0

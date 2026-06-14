@@ -20,6 +20,7 @@ from evidence_monitor.llm.adapters.claude_target import ClaudeTargetAdapter
 from evidence_monitor.llm.adapters.gemini import GeminiAdapter
 from evidence_monitor.llm.adapters.open_evidence import OpenEvidenceAdapter
 from evidence_monitor.llm.adapters.openai_gpt4o import OpenAIGpt4oAdapter
+from evidence_monitor.llm.adapters.provider_evidence_dev import ProviderEvidenceDevAdapter
 from evidence_monitor.observability.cost import TokenPrice
 
 # Provider id (structural, content-agnostic) → adapter class. Provider names are not regulated
@@ -29,6 +30,8 @@ _ADAPTER_BY_ID: dict[str, type] = {
     "google-gemini": GeminiAdapter,
     "anthropic-claude-target": ClaudeTargetAdapter,
     "open-evidence": OpenEvidenceAdapter,
+    # Optional DEV stand-in for the future Open Evidence Provider target (PubMed + synthesis).
+    "provider-evidence-dev": ProviderEvidenceDevAdapter,
 }
 
 # Keys present in targets.yaml that are consumed elsewhere (cost.py), not by LLMTarget.

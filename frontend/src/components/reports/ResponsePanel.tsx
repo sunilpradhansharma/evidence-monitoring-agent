@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
 import { getResponse, type ResponseDetail } from "../../api";
+import {
+  isProviderEvidenceDev,
+  PROVIDER_EVIDENCE_DEV_NOTE,
+  targetLabel,
+} from "../../targets";
 
 export default function ResponsePanel({
   responseId,
@@ -46,10 +51,16 @@ export default function ResponsePanel({
             <>
               <div className="flex flex-wrap gap-2">
                 <span className="id tag tag-muted">{data.question_id}</span>
-                <span className="tag tag-muted">{data.llm_name}</span>
+                <span className="tag tag-muted">{targetLabel(data.llm_name)}</span>
                 <span className="tag tag-muted">{data.persona.toLowerCase()}</span>
                 <span className="tag">{data.status.toLowerCase()}</span>
               </div>
+              {isProviderEvidenceDev(data.llm_name) && (
+                <div className="rounded-lg border border-brand-line bg-brand-soft p-3 text-xs leading-relaxed text-ink">
+                  <span className="font-bold text-brand-dark">How this was produced — </span>
+                  {PROVIDER_EVIDENCE_DEV_NOTE}
+                </div>
+              )}
               {data.score && (
                 <div className="rounded-lg border border-hair bg-surface-muted p-3">
                   <p className="font-semibold">Scoring rationale</p>

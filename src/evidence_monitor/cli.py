@@ -42,6 +42,9 @@ from evidence_monitor.data_access.models import (
 )
 from evidence_monitor.data_access.sqlite_store import SqliteStore
 from evidence_monitor.llm.adapters.base import HealthResult
+from evidence_monitor.llm.adapters.provider_evidence_dev import (
+    DISPLAY_NAME as _PROVIDER_EVIDENCE_DEV_NAME,
+)
 from evidence_monitor.llm.client import ClaudeClient
 from evidence_monitor.llm.registry import build_adapter, load_prices, load_targets
 from evidence_monitor.observability.logging import get_logger, log_event, register_secret
@@ -54,6 +57,14 @@ from evidence_monitor.question_repo.repository import QuestionService
 from evidence_monitor.scoring.scorer import Scorer
 
 _LOGGER = get_logger("evidence_monitor.cli")
+
+# Display names for targets whose id slug should not be shown raw (structural labels, not regulated
+# content). Keeps the dev stand-in shown as "Provider evidence (dev)" — never as "Open Evidence".
+_TARGET_DISPLAY: dict[str, str] = {"provider-evidence-dev": _PROVIDER_EVIDENCE_DEV_NAME}
+
+
+def _target_display(target_id: str) -> str:
+    return _TARGET_DISPLAY.get(target_id, target_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -221,7 +232,7 @@ def _print_capture_scoring_confirmation(store: SqliteStore, state: RunState) -> 
         else:
             scored = "not scored (no capturable text)"
         print(
-            f"    [{r.status}] {r.question_id} · {r.target_id}"
+            f"    [{r.status}] {r.question_id} · {_target_display(r.target_id)}"
             + (f" — {r.error_class}" if r.status is ResponseStatus.FAILED and r.error_class else "")
             + f"\n        {scored}"
         )
@@ -334,7 +345,7 @@ def cmd_approve_all_test_numbered(
 def cmd_reset_to_pending(store: SqliteStore) -> int:
     """Companion to ``approve-all-test-numbered``: reset EVERY question back to PENDING and clear
     its ``approver_name`` and ``approval_note`` (so the real demo starts from a clean slate before
-    Nisha approves the live subset).
+    the Medical Affairs approver signs off on the live subset).
 
     Idempotent — a question already PENDING with no approver/note is skipped. Uses the same
     ``set_approval`` seam + audit log; the reset is recorded as a QUESTION_EDITED curation event.
