@@ -67,35 +67,221 @@ In brief:
 10. **Built to grow into production** — externals sit behind clean `llm` and `data_access` seams that swap to Bedrock/Aurora by config.
 11. **Quality is testable** — unit/component/e2e tests; ≥70% coverage on core; capture-rate and scoring schema are checked automatically.
 
-## Diagrams
+## Architecture diagrams
 
-All diagrams live in [`docs/diagrams/`](docs/diagrams/).
+All diagrams live in [`docs/diagrams/`](docs/diagrams/). Each one below is followed by a plain-language,
+step-by-step walkthrough so a non-engineer can follow the flow.
 
-| Diagram | What it shows |
-|---------|---------------|
-| `evidence_monitor_system_context` | The system in context: stakeholders, the agent, and the external LLM targets. |
-| `evidence_monitor_detailed_pipeline` | End-to-end pipeline from approved question to scored, alerted, dashboarded result. |
-| `evidence_monitor_module_architecture` *(planned — not yet in repo)* | Package/module map and the `llm` / `data_access` seams. |
-| `orchestrator_detailed_langgraph_graph` | The explicit LangGraph orchestration graph (no autonomous loops). |
-| `per_question_dispatch_four_outcomes` | Per-question dispatch and the four capture outcomes (SUCCESS/FAILED/TRUNCATED/BLOCKED). |
-| `detailed_daily_run_sequence` | The daily run as a sequence: load → dispatch → persist → score → alert → summarize. |
-| `scoring_and_alert_decision_flow` | How a structured score becomes a deterministic alert decision. |
-| `evidence_monitor_detailed_erd` | Entity-relationship model (Question, LLM_Target, Run, Response, Scoring_Record, Alert, Audit_Log). |
-| `evidence_monitor_local_execution_view` | How the pieces run together on a single local machine. |
+### 1. System context
 
-System context:
+Shows where the whole system sits — who uses it, where it runs, and which external LLM services it talks to.
 
 ![System context](docs/diagrams/evidence_monitor_system_context.svg)
 
-Pipeline:
+**How to read it, step by step:**
+1. Everything inside **"Your local machine"** is the POC; everything under **"External LLM services (internet)"** lives outside it, reached over HTTPS.
+2. A **local scheduler** (cron, daily at 02:00) kicks off a **run** of the **Evidence Monitoring Agent** (the local Python POC).
+3. **Medical Affairs** sits on the left and feeds the agent by **curating + approving** questions — nothing runs against an unapproved question.
+4. The agent submits approved questions to the external targets — **OpenAI GPT-4o**, **Google Gemini**, **Anthropic Claude** (used here as a *target*, not the orchestrator), and the conditional **Open Evidence** (Provider-persona only).
+5. Each target answers over **HTTPS (query ↔ response)**; the agent captures what comes back.
+6. The agent produces a **Dashboard (HTML) + CSV/JSON export**, which **Stakeholders (Commercial + MA)** read as **findings**.
 
-![Detailed pipeline](docs/diagrams/evidence_monitor_detailed_pipeline.svg)
+### 2. Detailed end-to-end pipeline
 
-Scoring & alert decision flow:
+Answers "what happens to one approved question, from input config all the way to a dashboarded, alerted result?"
+
+![Detailed end-to-end pipeline](docs/diagrams/evidence_monitor_detailed_pipeline.svg)
+
+**How to read it, step by step:**
+1. **Inputs** feed the run: `config.yaml` (targets, limits, params), `.env` secrets (API keys), and the question CSV (Medical Affairs curation).
+2. Those load the **Question repository** — versioned, with the `PENDING → APPROVED` gate.
+3. The **Orchestrator (Claude)** pulls only **APPROVED** questions and assigns a `run_id`.
+4. A **per-question fan-out** sends each question to the **4 adapters**, rate-limited, retrying transient failures up to 3 times.
+5. Every answer lands in the **Response repository** — immutable, with full metadata, retained 24 months.
+6. **Scoring (Claude)** turns each stored response into structured JSON (sentiment, competitive position, claims).
+7. The **Alert engine** applies deterministic rules, then **Dashboard + export** renders the four sections, CSV/JSON, and the run summary.
+8. Running alongside the whole pipeline, **Observability** captures the **append-only audit log**, **structured JSON logs**, and **cost tracking** (tokens, $) — every stage writes here.
+
+### 3. LangGraph orchestration state graph
+
+Answers "what are the explicit, code-defined steps of a run — and how does it resume after an interruption?"
+
+![LangGraph orchestration state graph](docs/diagrams/orchestrator_detailed_langgraph_graph.svg)
+
+**How to read it, step by step:**
+1. The run begins at **START** and enters **`init_run`**, which sets the `run_id`, loads config, and figures out any resume point.
+2. **`load_questions`** pulls the questions whose `status = APPROVED`.
+3. **`dispatch + collect`** submits each question to each target (retry ≤ 3); the loop arrow (↻) shows it repeats per question × target.
+4. **`persist + checkpoint`** writes each answer immutably and saves a cursor (the resume point).
+5. The **"more questions?"** decision loops back to dispatch (**yes → next question**) until there are none left (**no**).
+6. Then **`score_batch`** runs Claude for structured JSON, **`evaluate_alerts`** applies the deterministic rules, and **`render + summary`** produces HTML/export/cost and notifies, ending at **END**.
+7. The side panel **RunState** (`run_id`, trigger, targets, APPROVED questions, the resume **cursor**, responses, scores, alerts, summary) is the shared state every node reads and updates — the saved cursor is what makes a run resumable.
+
+### 4. Per-question dispatch (four outcomes)
+
+Answers "for a single question sent to a single target, how do we decide whether it's SUCCESS, TRUNCATED, BLOCKED, or FAILED?"
+
+![Per-question dispatch — four outcomes](docs/diagrams/per_question_dispatch_four_outcomes.svg)
+
+**How to read it, step by step:**
+1. **Pull question**, then **Submit to target** (rate-limited) and inspect the **`finish_reason`** the target returns.
+2. **`ok`** → store the record as **SUCCESS**.
+3. **`length`** (the answer hit the token ceiling) → **bump `max_tokens` and retry once**; if still cut off, store as **TRUNCATED** with the full captured text preserved.
+4. **`safety`** (the provider's filter blocked it) → store as **BLOCKED**, with the block reason — kept distinct from a failure.
+5. **`error`** → **retry ≤ 3** with exponential backoff (**2s · 4s · 8s**); if the budget is exhausted, store as **FAILED**.
+6. Whatever the outcome, the flow moves to **Next** and continues; the **↻ resumable** marker shows the run can pick up here after an interruption without re-sending completed work.
+
+### 5. Daily-run sequence (who calls whom)
+
+Answers "in time order, which component calls which during a daily run?"
+
+![Daily-run sequence](docs/diagrams/detailed_daily_run_sequence.svg)
+
+**How to read it, step by step:**
+1. The **daily run** starts the **Orchestrator (Claude)**, which first loads config + secrets.
+2. The orchestrator asks the **Question repository** to **fetch approved**, and gets back the **question batch**.
+3. It then enters a **loop · per question × target**, submitting each to the **LLM targets** (3 public LLMs) with **retry ≤ 3**, receiving a **response / error**.
+4. Each result is handed to the **Response repository** to **persist (status)**, which returns a **`response_id`** and writes an **audit** entry.
+5. After capture, the orchestrator calls **Scoring + alerts (Claude)** to **score batch**, gets **Claude JSON** back, and the code attaches the **score + alert flag**; **alerts ready** signals completion.
+6. Finally the orchestrator **renders the dashboard + run summary + audit** — the run's visible output.
+
+### 6. Scoring & alert decision flow
+
+Answers "how does one stored response become a structured score, and how does code (not the model) decide whether to alert?"
 
 ![Scoring and alert decision flow](docs/diagrams/scoring_and_alert_decision_flow.svg)
 
-> The ERD is an interactive HTML file: [`docs/diagrams/evidence_monitor_detailed_erd.html`](docs/diagrams/evidence_monitor_detailed_erd.html).
+**How to read it, step by step:**
+1. Start from a **Response record** (its full `response_text`) and the **MA-reviewed scoring prompt** template.
+2. **Claude scoring** (Bedrock / API) reads both and returns **structured JSON**: `sentiment_score` (−1..+1), `competitive_position`, `citation_status` (including **WRONG_INDICATION** for wrong-disease content), `brand_mentions[]`, up to five `key_claims`, and a `scoring_rationale`.
+3. That score is saved as a **scoring record** — versioned and linked to the `response_id` — so the original response is never altered and re-scoring keeps history.
+4. **Code** then evaluates deterministic threshold rules: **Rule 1** `sentiment < −0.3`, **Rule 2** `position = NOT_RECOMMENDED`, **Rule 3** a competitor sits materially above our therapy in the same response, and **Rule 4** `citation_status = WRONG_INDICATION` (the highest-severity rule).
+5. An **OR gate (any rule true?)** combines them: if **no** rule fires → **No alert** (`alert_triggered = false`).
+6. If **yes** → **Create alert + flag** (`alert_triggered = true`), recording which rule fired — the model produces the score, but only code makes the alert decision.
+
+### 7. Data model (ERD)
+
+Answers "what records exist and how are they linked — questions, runs, responses, scores, alerts, and the audit trail?"
+
+```mermaid
+erDiagram
+  QUESTION ||--o{ RESPONSE : "asked in"
+  LLM_TARGET ||--o{ RESPONSE : "answered by"
+  RUN ||--o{ RESPONSE : "batches"
+  RUN ||--o{ AUDIT_LOG : "logs"
+  RESPONSE ||--o{ SCORING_RECORD : "scored, versioned"
+  SCORING_RECORD ||--o{ ALERT : "raises"
+  QUESTION {
+    string question_id PK
+    string question_text
+    enum persona
+    string therapeutic_area
+    string brand_focus
+    enum domain
+    boolean active
+    enum approval_status
+    string approver_name
+    int version
+    timestamp created_at
+    timestamp updated_at
+  }
+  LLM_TARGET {
+    string target_id PK
+    string llm_name
+    string model_version
+    string endpoint
+    float temperature
+    int max_tokens
+    int rpm_limit
+    int tpm_limit
+    string personas
+    boolean active
+  }
+  RUN {
+    string run_id PK
+    enum trigger_type
+    timestamp started_at
+    timestamp ended_at
+    int questions_attempted
+    int responses_captured
+    int failure_count
+    int total_tokens
+    float est_cost
+  }
+  RESPONSE {
+    uuid response_id PK
+    string run_id FK
+    string question_id FK
+    string target_id FK
+    timestamp timestamp_utc
+    string llm_name
+    string llm_model_version
+    enum persona
+    string therapeutic_area
+    string brand_focus
+    enum domain
+    text response_text
+    int response_tokens
+    enum finish_reason
+    enum status
+    boolean alert_triggered
+    timestamp created_at
+  }
+  SCORING_RECORD {
+    uuid score_id PK
+    uuid response_id FK
+    float sentiment_score
+    enum competitive_position
+    json brand_mentions
+    json key_claims
+    text scoring_rationale
+    string scorer_model
+    int version
+    boolean is_human_override
+    timestamp created_at
+  }
+  ALERT {
+    uuid alert_id PK
+    uuid score_id FK
+    uuid response_id FK
+    enum rule_fired
+    string reason
+    timestamp created_at
+  }
+  AUDIT_LOG {
+    uuid audit_id PK
+    string run_id FK
+    enum event_type
+    string target
+    timestamp ts
+    int http_status
+    string detail
+  }
+```
+
+> An interactive version is also available: [`docs/diagrams/evidence_monitor_detailed_erd.html`](docs/diagrams/evidence_monitor_detailed_erd.html).
+
+**How to read it, step by step:**
+1. A **QUESTION** (with its persona, therapeutic area, brand focus, domain, approval status, and version) is *asked in* many **RESPONSE** records — one question, many answers.
+2. An **LLM_TARGET** (its model version, parameters, and rate limits) *answers* many **RESPONSE** records — one target, many answers.
+3. A **RUN** (with its trigger, timings, counts, tokens, and cost) *batches* many **RESPONSE** records and also *logs* many **AUDIT_LOG** entries.
+4. Each **RESPONSE** is immutable and *scored* into many **SCORING_RECORD** versions — re-scoring adds a version, never overwrites.
+5. Each **SCORING_RECORD** can *raise* many **ALERT** records, each noting the rule that fired.
+6. Reading the "crow's-foot" ends: the single bar (`||`) is the *one* side and the branching foot (`o{`) is the *many* side, so the chain runs Question/Target/Run → Response → Scoring_Record → Alert, with Audit_Log hanging off the Run.
+
+### 8. Local execution view
+
+Answers "when this runs on one laptop, what processes, files, and folders are actually involved?"
+
+![Local execution view](docs/diagrams/evidence_monitor_local_execution_view.svg)
+
+**How to read it, step by step:**
+1. Everything happens inside one **Local machine** — no cloud services in the POC.
+2. **cron / APScheduler** (daily 02:00) launches the **Python process** (`evidence_monitor run`).
+3. At startup the process reads **config + secrets** (`targets.yaml`, `.env`).
+4. The process calls out over **HTTPS** to the **External LLM APIs** (OpenAI GPT-4o, Google Gemini, Anthropic Claude, and the conditional Open Evidence).
+5. It writes its records to local storage: a **SQLite db** (all records) and an append-only **`audit.jsonl`**.
+6. It also writes operational output: **`logs/`** (JSON events) and **`out/`** (the HTML dashboard and CSV exports) — everything the run produces stays on the local disk.
 
 ## How a run works
 
