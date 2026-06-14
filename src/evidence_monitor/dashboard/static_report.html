@@ -3,15 +3,24 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Evidence Monitoring — Reports</title>
+  <title>Evidence Monitoring AI Agent — Reports</title>
   {% include "_styles.html" %}
 </head>
 <body>
-  <h1>Evidence Monitoring — Reports</h1>
-  <p class="muted">
-    Self-contained export — no software required.
-    {% if generated_at %}Generated {{ generated_at }}.{% endif %}
-  </p>
+<div class="wrap">
+  <header class="masthead">
+    <h1>
+      <svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 3l8 4v5c0 4.4-3.1 7.9-8 9-4.9-1.1-8-4.6-8-9V7l8-4z" />
+        <path d="M8 12l2.5 2.5L16 9" />
+      </svg>
+      Evidence Monitoring AI Agent
+    </h1>
+    <p class="lede">How public AI models represent the therapy versus competitors.
+      Self-contained export — no software required.{% if generated_at %} Generated {{ generated_at }}.{% endif %}</p>
+  </header>
   {% include "reports_section.html" %}
+</div>
 </body>
 </html>

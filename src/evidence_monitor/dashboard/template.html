@@ -3,128 +3,177 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Evidence Monitoring — Local Console</title>
+  <title>Evidence Monitoring AI Agent</title>
   {% include "_styles.html" %}
 </head>
 <body>
-  <h1>Evidence Monitoring — Local Console</h1>
-  <p class="muted">Local-only (127.0.0.1) · no authentication (out of scope). Reports are read-only;
-    only the Approvals tab writes.</p>
+<div class="wrap">
+  <header class="masthead">
+    <h1>
+      <svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 3l8 4v5c0 4.4-3.1 7.9-8 9-4.9-1.1-8-4.6-8-9V7l8-4z" />
+        <path d="M8 12l2.5 2.5L16 9" />
+      </svg>
+      Evidence Monitoring AI Agent
+    </h1>
+    <p class="lede">How public AI models represent the therapy versus competitors. Only approved
+      questions are sent; a human approves every question.</p>
+  </header>
 
   <nav class="tabs">
     <a href="/?tab=reports" class="{{ 'active' if active_tab == 'reports' else '' }}">Reports</a>
     <a href="/?tab=approvals" class="{{ 'active' if active_tab == 'approvals' else '' }}">Approvals</a>
-    {% if score_review_enabled %}
-    <a href="/?tab=score-review" class="{{ 'active' if active_tab == 'score-review' else '' }}">Score review</a>
-    {% else %}
-    <a class="disabled" title="Scaffolded — disabled in this build (FR-408)">Score review</a>
-    {% endif %}
   </nav>
 
   {% if active_tab == 'approvals' %}
-  {# ---- Approvals tab (read-write) ------------------------------------------------------ #}
+  {# ---- Approvals tab — the ONLY tab that writes (approve/reject via the audited workflow) ---- #}
   <section data-tab="approvals">
-    <h2>Pending questions ({{ pending|length }})</h2>
-    <div class="card">
-      <label>Your name (recorded on every action — SE-002)
-        <input type="text" id="approver" placeholder="e.g. j.smith" />
-      </label>
-      <p class="muted" id="action-status"></p>
+    <div class="banner" data-section="compliance">
+      <span class="b-title">Compliance:</span> only approved questions are ever sent to any model.
+      Every approve or reject is recorded with the reviewer's name and a timestamp in the
+      append-only audit log.
     </div>
-    {% if pending %}
-      {% for q in pending %}
-      <div class="card" data-question-id="{{ q.question_id }}">
-        <strong>{{ q.question_id }}</strong>
-        <span class="pill">{{ q.persona }}</span>
-        <span class="pill">{{ q.therapeutic_area }}</span>
-        <span class="pill">{{ q.domain }}</span>
-        <p>{{ q.question_text }}</p>
-        <div class="approve-form">
-          <input type="text" placeholder="rationale / rejection reason" class="reason" />
-          <button class="primary" onclick="act('{{ q.question_id }}', 'approve', this)">Approve</button>
-          <button class="danger" onclick="act('{{ q.question_id }}', 'reject', this)">Reject</button>
-        </div>
-      </div>
-      {% endfor %}
-    {% else %}
-      <p class="empty">No pending questions.</p>
-    {% endif %}
-  </section>
 
-  {# ---- Approved questions (READ-ONLY) — same Approvals tab, no write actions --------------- #}
-  {% if approved %}
-  <section data-tab="approved-questions">
-    <h2>Approved questions ({{ approved.total }})</h2>
-    <p class="muted">Read-only. APPROVED + active questions (current version), via the
-      question-repository read path. To change approval, use the Pending queue above.</p>
-    <form class="filters" method="get" action="/">
+    {# Status counts — version-aware (latest version per question). #}
+    <div class="statbar" data-section="approval-counts">
+      <span class="stat"><b>{{ data.approval_gate.pending }}</b> Pending</span>
+      <span class="stat"><b>{{ data.approval_gate.approved }}</b> Approved</span>
+      <span class="stat"><b>{{ data.approval_gate.rejected }}</b> Rejected</span>
+      <span class="stat"><b>{{ data.approval_gate.total }}</b> Total questions</span>
+    </div>
+
+    <div class="card">
+      <label>Reviewer name (recorded on every action — SE-002)
+        <input type="text" id="approver" placeholder="e.g. j.smith" oninput="syncButtons()" />
+      </label>
+      <p class="muted" id="action-status">Enter your reviewer name to enable approve / reject.</p>
+    </div>
+
+    {# Filters: status + persona. #}
+    <form class="filters" method="get" action="/" data-section="approval-filters">
       <input type="hidden" name="tab" value="approvals" />
+      <label>Status
+        <select name="status">
+          {% for s in ["PENDING", "APPROVED", "REJECTED", "ALL"] %}
+          <option value="{{ s }}" {% if status_filter == s %}selected{% endif %}>{{ s|capitalize }}</option>
+          {% endfor %}
+        </select>
+      </label>
       <label>Persona
         <select name="persona">
           <option value="">All</option>
-          {% for p in approved.options.personas %}
-          <option value="{{ p }}" {% if approved.filters.persona == p %}selected{% endif %}>{{ p }}</option>
+          {% for p in data.options.personas %}
+          <option value="{{ p }}" {% if persona_filter == p %}selected{% endif %}>{{ p }}</option>
           {% endfor %}
         </select>
       </label>
-      <label>Therapeutic area
-        <select name="therapeutic_area">
-          <option value="">All</option>
-          {% for ta in approved.options.therapeutic_areas %}
-          <option value="{{ ta }}" {% if approved.filters.therapeutic_area == ta %}selected{% endif %}>{{ ta }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label>Domain
-        <select name="domain">
-          <option value="">All</option>
-          {% for d in approved.options.domains %}
-          <option value="{{ d }}" {% if approved.filters.domain == d %}selected{% endif %}>{{ d }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label>Search<input type="search" name="search" placeholder="id or text" value="{{ approved.filters.search }}" /></label>
       <button type="submit" class="primary">Apply</button>
       <a href="/?tab=approvals"><button type="button">Reset</button></a>
     </form>
 
-    {% if approved.questions %}
-    <table>
-      <thead><tr>
-        <th>question_id</th><th>persona</th><th>therapeutic_area</th><th>brand_focus</th>
-        <th>domain</th><th>status</th><th>approver_name</th><th>note</th>
-        <th class="num">ver</th><th>updated (UTC)</th><th>question_text</th>
-      </tr></thead>
-      <tbody>
-      {% for q in approved.questions %}
-        <tr>
-          <td>{{ q.question_id }}</td>
-          <td>{{ q.persona }}</td>
-          <td>{{ q.therapeutic_area }}</td>
-          <td>{{ q.brand_focus }}</td>
-          <td>{{ q.domain }}</td>
-          <td>{{ q.approval_status }}</td>
-          <td>{{ q.approver_name if q.approver_name is not none else "—" }}</td>
-          <td>{{ q.approval_note if q.approval_note is not none else "—" }}</td>
-          <td class="num">{{ q.version }}{% if q.version > 1 %} <span class="pill" title="Edited/re-approved; prior versions retained">versioned</span>{% endif %}</td>
-          <td>{{ q.updated_at.strftime("%Y-%m-%d %H:%M") if q.updated_at.strftime is defined else q.updated_at }}</td>
-          <td><details><summary>{{ q.question_text[:60] }}{% if q.question_text|length > 60 %}…{% endif %}</summary>
-            <div class="body">{{ q.question_text }}</div></details></td>
-        </tr>
+    {% if status_filter in ["PENDING", "ALL"] %}
+    {# Pending review queue — writable cards, grouped by persona for navigability. #}
+    <h2>Pending questions — review queue ({{ pending|length }})</h2>
+    <p class="section-note">Each pending question awaits a Medical Affairs decision, grouped by
+      persona. Approving makes it eligible for the next run; rejecting excludes it from all runs.
+      Both are audited.</p>
+    {% if pending %}
+      {% for persona, group in pending|groupby('persona') %}
+      <div class="pgroup-head">
+        <h3>{{ persona|capitalize }}</h3>
+        <span class="count">{{ group|length }} pending</span>
+      </div>
+      {% for q in group %}
+      <div class="qcard" data-question-id="{{ q.question_id }}">
+        <div class="q-top">
+          <span class="q-id">{{ q.question_id }}</span>
+          <span class="tag">{{ q.persona }}</span>
+          <span class="tag muted">{{ q.therapeutic_area }}</span>
+          <span class="tag muted">{{ q.domain }}</span>
+        </div>
+        <p class="q-text">{{ q.question_text }}</p>
+        <div class="approve-form">
+          <input type="text" placeholder="rationale / rejection reason" class="reason" />
+          <button class="primary act-btn" disabled onclick="act('{{ q.question_id }}', 'approve', this)">Approve</button>
+          <button class="danger act-btn" disabled onclick="act('{{ q.question_id }}', 'reject', this)">Reject</button>
+        </div>
+      </div>
       {% endfor %}
-      </tbody>
-    </table>
+      {% endfor %}
     {% else %}
-    <p class="empty">No approved questions match the current filters.</p>
+      <p class="empty">No pending questions match the current filters.</p>
+    {% endif %}
+    {% endif %}
+
+    {# Approved questions (READ-ONLY) — shown unless the Rejected status is selected. #}
+    {% if approved and status_filter in ["PENDING", "APPROVED", "ALL"] %}
+    <section data-tab="approved-questions">
+      <h2>Approved questions ({{ approved.total }})</h2>
+      <p class="section-note">Read-only. Currently-approved questions (latest version), via the
+        question-repository read path. To change approval, use the pending queue above.</p>
+      <table>
+        <thead><tr>
+          <th>question_id</th><th>persona</th><th>therapeutic_area</th><th>domain</th>
+          <th>approver_name</th><th>note</th><th class="num">ver</th><th>updated (UTC)</th><th>question_text</th>
+        </tr></thead>
+        <tbody>
+        {% for q in approved.questions %}
+          <tr>
+            <td>{{ q.question_id }}</td>
+            <td>{{ q.persona }}</td>
+            <td>{{ q.therapeutic_area }}</td>
+            <td>{{ q.domain }}</td>
+            <td>{{ q.approver_name if q.approver_name is not none else "—" }}</td>
+            <td>{{ q.approval_note if q.approval_note is not none else "—" }}</td>
+            <td class="num">{{ q.version }}{% if q.version > 1 %} <span class="pill" title="Edited/re-approved; prior versions retained">versioned</span>{% endif %}</td>
+            <td>{{ q.updated_at.strftime("%Y-%m-%d %H:%M") if q.updated_at.strftime is defined else q.updated_at }}</td>
+            <td><details><summary>{{ q.question_text[:60] }}{% if q.question_text|length > 60 %}…{% endif %}</summary>
+              <div class="body">{{ q.question_text }}</div></details></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% if not approved.questions %}<p class="empty">No approved questions match the current filters.</p>{% endif %}
+    </section>
+    {% endif %}
+
+    {# Rejected questions (READ-ONLY) — shown only when explicitly selected. #}
+    {% if status_filter in ["REJECTED", "ALL"] %}
+    <section data-tab="rejected-questions">
+      <h2>Rejected questions ({{ rejected|length }})</h2>
+      <p class="section-note">Read-only. Excluded from all runs; retained for the audit trail.</p>
+      {% if rejected %}
+      <table>
+        <thead><tr><th>question_id</th><th>persona</th><th>therapeutic_area</th>
+          <th>approver_name</th><th>note</th><th>question_text</th></tr></thead>
+        <tbody>
+        {% for q in rejected %}
+          <tr><td>{{ q.question_id }}</td><td>{{ q.persona }}</td><td>{{ q.therapeutic_area }}</td>
+            <td>{{ q.approver_name if q.approver_name is not none else "—" }}</td>
+            <td>{{ q.approval_note if q.approval_note is not none else "—" }}</td>
+            <td>{{ q.question_text[:80] }}{% if q.question_text|length > 80 %}…{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}<p class="empty">No rejected questions.</p>{% endif %}
+    </section>
     {% endif %}
   </section>
-  {% endif %}
 
   <script>
+    function syncButtons() {
+      const ok = document.getElementById('approver').value.trim().length > 0;
+      document.querySelectorAll('.act-btn').forEach(b => { b.disabled = !ok; });
+      const status = document.getElementById('action-status');
+      if (status) status.textContent = ok
+        ? 'Ready — approve or reject any question below.'
+        : 'Enter your reviewer name to enable approve / reject.';
+    }
     async function act(qid, action, btn) {
       const approver = document.getElementById('approver').value.trim();
       const status = document.getElementById('action-status');
-      if (!approver) { status.textContent = 'Enter your name before approving/rejecting.'; return; }
+      if (!approver) { status.textContent = 'Enter your reviewer name before approving / rejecting.'; return; }
       const card = btn.closest('[data-question-id]');
       const reason = card.querySelector('.reason').value.trim();
       if (action === 'reject' && !reason) { status.textContent = 'A reason is required to reject.'; return; }
@@ -137,14 +186,8 @@
       if (resp.ok) { window.location.href = '/?tab=approvals'; }
       else { const e = await resp.json(); status.textContent = `Error ${resp.status}: ${e.detail || 'failed'}`; }
     }
+    document.addEventListener('DOMContentLoaded', syncButtons);
   </script>
-
-  {% elif active_tab == 'score-review' and score_review_enabled %}
-  <section data-tab="score-review">
-    <h2>Score review (FR-408)</h2>
-    <p class="muted">Human override of an AI score — stored as a NEW versioned scoring record; the
-      AI score is retained, never deleted.</p>
-  </section>
 
   {% else %}
   {# ---- Reports tab (read-only) — same render path as the static export ------------------ #}
@@ -152,5 +195,6 @@
     {% include "reports_section.html" %}
   </section>
   {% endif %}
+</div>
 </body>
 </html>

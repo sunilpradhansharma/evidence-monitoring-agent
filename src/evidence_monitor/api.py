@@ -22,6 +22,7 @@ module has no filesystem side effect.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from typing import Annotated
 
@@ -33,6 +34,7 @@ from evidence_monitor.config.settings import Settings, credential_preflight, get
 from evidence_monitor.dashboard.render import (
     build_approved_questions,
     build_report,
+    latest_per_question,
     render_app,
 )
 from evidence_monitor.data_access.interface import DataAccess, QueryFilters
@@ -176,7 +178,7 @@ def _as_bool(value: str | None) -> bool | None:
 # --------------------------------------------------------------------------- #
 def create_app(store: DataAccess | None = None, settings: Settings | None = None) -> FastAPI:
     """Build the FastAPI app. Pass ``store``/``settings`` to inject them (tests); else lazy."""
-    app = FastAPI(title="Evidence Monitoring Agent — Local Console")
+    app = FastAPI(title="Evidence Monitoring AI Agent")
     app.state.store = store
     app.state.settings = settings
     _register_ui(app)
@@ -193,13 +195,39 @@ def create_app(store: DataAccess | None = None, settings: Settings | None = None
 def _register_ui(app: FastAPI) -> None:
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request, store: StoreDep, settings: SettingsDep) -> HTMLResponse:
-        """Serve the tabbed console. The Reports tab uses the same render path as the export."""
+        """Serve the tabbed app. The Reports tab uses the same render path as the export."""
         active_tab = request.query_params.get("tab", "reports")
         params = request.query_params
-        report = build_report(store, _filters_from_params(params))
-        pending = QuestionService(store.questions).list_questions(
-            approval_status=ApprovalStatus.PENDING, active=True
+
+        # Reports default to the LATEST run when none is chosen (US5); an explicit run_id (or "All
+        # runs" → no run_id, never reaches here because the empty value is falsy) overrides it.
+        filters = _filters_from_params(params)
+        if filters.run_id is None and "run_id" not in params:
+            runs = store.runs.list()
+            if runs:
+                filters = replace(filters, run_id=runs[0].run_id)
+        report = build_report(store, filters)
+
+        # Approvals tab inputs. All reads are version-aware (latest version per question); the ONLY
+        # writes remain the approve/reject endpoints. Status + persona filter the queue/lists.
+        status_filter = (params.get("status") or "PENDING").upper()
+        if status_filter not in {"PENDING", "APPROVED", "REJECTED", "ALL"}:
+            status_filter = "PENDING"
+        persona_filter = params.get("persona") or ""
+        persona_enum = _enum_or_none(Persona, persona_filter)
+        svc = QuestionService(store.questions)
+        # latest_per_question guarantees one row per question at its current version (no version
+        # leak); pending is persona-then-id sorted so the template can group it by persona.
+        pending = latest_per_question(
+            svc.list_questions(
+                approval_status=ApprovalStatus.PENDING, active=True, persona=persona_enum
+            )
         )
+        pending.sort(key=lambda q: (str(q.persona), q.question_id))
+        rejected = latest_per_question(
+            svc.list_questions(approval_status=ApprovalStatus.REJECTED, persona=persona_enum)
+        )
+        rejected.sort(key=lambda q: q.question_id)
         # Read-only approved-questions view (Approvals tab) — through the question-repo read path.
         approved_view = build_approved_questions(
             store,
@@ -212,6 +240,9 @@ def _register_ui(app: FastAPI) -> None:
             report,
             pending_questions=pending,
             approved_view=approved_view,
+            rejected_questions=rejected,
+            status_filter=status_filter,
+            persona_filter=persona_filter,
             active_tab=active_tab,
             score_review_enabled=settings.enable_score_review,
         )

@@ -1,12 +1,13 @@
-{# The four Reports sections (FR-023) + drill-down (FR-024). Shared by the static export and the
-   served Reports tab. `interactive` toggles the live filter form vs. a static "filters applied"
-   line. Read-only: this fragment renders aggregates, it never mutates anything. #}
+{# Reports sections (FR-023) + drill-down (FR-024). Shared by the static export and the served
+   Reports tab. `interactive` toggles the live filter form + click-through links vs. static text.
+   Read-only: this fragment renders aggregates, it never mutates anything. Content-agnostic — every
+   brand / therapeutic-area / model value flows through as data. #}
 
 {% if interactive %}
 <form class="filters" method="get" action="/">
   <input type="hidden" name="tab" value="reports" />
   <label>Run
-    <select name="run_id">
+    <select name="run_id" onchange="this.form.submit()">
       <option value="">All runs</option>
       {% for r in data.runs %}
       <option value="{{ r.run_id }}" {% if data.filters.run_id == r.run_id %}selected{% endif %}>
@@ -31,7 +32,7 @@
       {% endfor %}
     </select>
   </label>
-  <label>LLM
+  <label>Model
     <select name="llm">
       <option value="">All</option>
       {% for m in data.options.llms %}
@@ -55,31 +56,186 @@
 
 <p class="muted">{{ data.total_responses }} response(s) in view · {{ data.alert_count }} alert(s).</p>
 
-{# (a) Sentiment distribution by LLM and therapy #}
+{# How to read this page — definitions of every scale and status used below. #}
+<details class="howto" data-section="howto">
+  <summary>How to read this page</summary>
+  <div class="body">
+    <dl>
+      <dt>Sentiment scale</dt>
+      <dd>−1.0 (very negative about the therapy) to +1.0 (very positive); 0 is neutral.
+        Favorable ≥ +0.30, concerning ≤ −0.30.</dd>
+      <dt>Competitive position</dt>
+      <dd>How the model ranks the therapy: first_line_recommended, among_options, second_line,
+        not_recommended, not_mentioned.</dd>
+      <dt>Citation status</dt>
+      <dd>Whether the right indication was cited: cited, partial, absent, or wrong_indication
+        (the model returned content for the wrong disease/indication).</dd>
+      <dt>Response status</dt>
+      <dd>success (complete answer), truncated (cut off at the token limit — partial text kept and
+        still scored), failed (no answer after retries), blocked (provider safety filter).</dd>
+    </dl>
+  </div>
+</details>
+
+{# Headline band — one plain-language sentence summarizing the selected run. #}
+{% if data.headline %}
+<div class="headline" data-section="headline">
+  <p>{{ data.headline.sentence }}</p>
+</div>
+{% endif %}
+
+{# Summary header — metric cards for the selected run (per-run scoped). #}
+<section data-section="summary">
+  <h2>Run summary</h2>
+  <p class="section-note">Capture and signal counts for the selected run. The truncated and
+    failed/blocked cards turn amber/red when a run has a problem, so a bad run flags itself.</p>
+  {% set m = data.metrics %}
+  <div class="metrics">
+    <div class="metric">
+      <div class="k">Responses</div>
+      <div class="v">{{ m.total }}</div>
+      <div class="sub">total in view</div>
+    </div>
+    <div class="metric{{ ' good' if m.success and not m.failed_blocked else '' }}">
+      <div class="k">Success</div>
+      <div class="v">{{ m.success }}</div>
+      <div class="sub">complete answers</div>
+    </div>
+    <div class="metric{{ ' warn' if m.truncated > 0 else ' good' }}">
+      <div class="k">Truncated</div>
+      <div class="v">{{ m.truncated }}</div>
+      <div class="sub">{{ 'cut off — partial text kept' if m.truncated > 0 else 'none cut off' }}</div>
+    </div>
+    <div class="metric{{ ' bad' if m.failed_blocked > 0 else ' good' }}">
+      <div class="k">Failed / blocked</div>
+      <div class="v">{{ m.failed_blocked }}</div>
+      <div class="sub">{{ m.failed }} failed · {{ m.blocked }} blocked</div>
+    </div>
+    <div class="metric{{ ' good' if m.capture_ok else (' bad' if m.total else '') }}">
+      <div class="k">Capture rate</div>
+      <div class="v">{{ "%.0f"|format(m.capture_rate_pct) }}%
+        {%- if m.total %} {{ '✓' if m.capture_ok else '✗' }}{% endif %}</div>
+      <div class="sub">target ≥ {{ "%.0f"|format(m.capture_target_pct) }}%</div>
+    </div>
+    <div class="metric{{ ' warn' if data.alert_count > 0 else '' }}">
+      <div class="k">Alerts</div>
+      <div class="v">{{ data.alert_count }}</div>
+      <div class="sub">
+        {%- if data.alerts_by_type %}
+          {% for t, n in data.alerts_by_type.items() %}{{ t }} {{ n }}{% if not loop.last %} · {% endif %}{% endfor %}
+        {%- else %}none{% endif %}
+      </div>
+    </div>
+    <div class="metric">
+      <div class="k">Scope</div>
+      <div class="v">{{ data.question_count }}×{{ data.model_count }}</div>
+      <div class="sub">questions × models</div>
+    </div>
+    <div class="metric">
+      <div class="k">Approval gate</div>
+      <div class="v">{{ data.approval_gate.approved }}<span class="muted" style="font-size:0.9rem"> / {{ data.approval_gate.pending }}</span></div>
+      <div class="sub">approved / pending</div>
+    </div>
+  </div>
+  {% if data.selected_run %}
+  {% set run = data.selected_run %}
+  <p class="runline">
+    run <code>{{ run.run_id[:8] }}</code> ·
+    {{ run.started_at.strftime("%Y-%m-%d %H:%M") if run.started_at.strftime is defined else run.started_at }} ·
+    {% if run.ended_at and run.started_at.strftime is defined %}
+    {% set secs = (run.ended_at - run.started_at).total_seconds()|int %}
+    duration {{ (secs // 60)|int }}m{{ (secs % 60)|int }}s ·
+    {% else %}
+    in progress ·
+    {% endif %}
+    est. cost ${{ "%.4f"|format(run.est_cost) }} ·
+    {{ run.total_tokens }} tokens
+  </p>
+  {% endif %}
+</section>
+
+{# Coverage map — question x model heatmap of how each model represented the therapy. #}
+<section data-section="coverage">
+  <h2>Coverage map — question × model</h2>
+  <p class="section-note">Each cell shows how that model represented the therapy for that question.
+    A dashed corner tag (⌐) marks a truncated response. {% if interactive %}Click a cell to open the
+    full response text and scoring rationale.{% endif %}</p>
+  <div class="legend">
+    <span class="item"><span class="sw favorable"></span> favorable</span>
+    <span class="item"><span class="sw partial"></span> partial</span>
+    <span class="item"><span class="sw negative"></span> negative / flagged</span>
+    <span class="item"><span class="sw absent"></span> absent (not mentioned)</span>
+    <span class="item"><span class="sw nodata"></span> no answer (failed/blocked)</span>
+    <span class="item"><span class="sw wrong_indication"></span> wrong indication</span>
+  </div>
+  {% if data.coverage_rows and data.coverage_models %}
+  <div class="coverage">
+    <table class="heat">
+      <thead><tr>
+        <th class="qcol">Question</th>
+        {% for m in data.coverage_models %}<th class="mcol">{{ m }}</th>{% endfor %}
+      </tr></thead>
+      <tbody>
+      {% for row in data.coverage_rows %}
+        <tr>
+          <td class="qlabel"><span class="muted">{{ row.question_id }}</span><br />{{ row.label }}</td>
+          {% for cell in row.cells %}
+          <td class="cell {{ cell.klass }}{{ ' trunc' if cell.truncated else '' }}" title="{{ cell.title }}">
+            {% if interactive and cell.response_id %}
+            <a href="/reports/responses/{{ cell.response_id }}">{{ cell.label }}</a>
+            {% else %}
+            <span class="cellspan">{{ cell.label }}</span>
+            {% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No responses in view.</p>
+  {% endif %}
+</section>
+
+{# (a) Sentiment distribution by model and therapy #}
 <section data-section="sentiment">
-  <h2>Sentiment distribution by LLM and therapy</h2>
+  <h2>Sentiment by model and therapy</h2>
+  <p class="section-note">Average sentiment toward the therapy (−1.0 to +1.0) for each model and
+    therapeutic area, with the count of positive / neutral / negative scored responses.</p>
   {% if data.sentiment_by_llm %}
-  <h3 class="muted">By LLM</h3>
+  <h3>By model</h3>
   <table>
-    <thead><tr><th>LLM</th><th class="num">Scored</th><th class="num">Avg</th>
+    <thead><tr><th>Model</th><th class="num">Scored</th><th style="width:40%">Average sentiment</th>
       <th class="num pos">+</th><th class="num neu">0</th><th class="num neg">−</th></tr></thead>
     <tbody>
     {% for llm, agg in data.sentiment_by_llm.items() %}
       <tr><td>{{ llm }}</td><td class="num">{{ agg.count }}</td>
-        <td class="num">{{ "%.2f"|format(agg.average) }}</td>
+        <td>
+          <span class="sbar-wrap">
+            <span class="sbar-track"><span class="sbar-mid"></span>
+              {% if agg.average >= 0 %}
+              <span class="sbar-fill pos" style="left:50%; width:{{ (agg.average * 50)|round(1) }}%"></span>
+              {% else %}
+              <span class="sbar-fill neg" style="right:50%; width:{{ (agg.average * -50)|round(1) }}%"></span>
+              {% endif %}
+            </span>
+            <span class="sval">{{ "%+.2f"|format(agg.average) }}</span>
+          </span>
+        </td>
         <td class="num pos">{{ agg.positive }}</td><td class="num neu">{{ agg.neutral }}</td>
         <td class="num neg">{{ agg.negative }}</td></tr>
     {% endfor %}
     </tbody>
   </table>
-  <h3 class="muted">By therapeutic area</h3>
+  <h3>By therapeutic area</h3>
   <table>
     <thead><tr><th>Therapeutic area</th><th class="num">Scored</th><th class="num">Avg</th>
       <th class="num pos">+</th><th class="num neu">0</th><th class="num neg">−</th></tr></thead>
     <tbody>
     {% for ta, agg in data.sentiment_by_therapy.items() %}
       <tr><td>{{ ta }}</td><td class="num">{{ agg.count }}</td>
-        <td class="num">{{ "%.2f"|format(agg.average) }}</td>
+        <td class="num">{{ "%+.2f"|format(agg.average) }}</td>
         <td class="num pos">{{ agg.positive }}</td><td class="num neu">{{ agg.neutral }}</td>
         <td class="num neg">{{ agg.negative }}</td></tr>
     {% endfor %}
@@ -90,12 +246,29 @@
   {% endif %}
 </section>
 
-{# (b) Competitive positioning by LLM #}
+{# Citation status panel #}
+<section data-section="citation">
+  <h2>Citation status</h2>
+  <p class="section-note">Whether the model cited the right indication.
+    <span class="pill wrong" title="The model returned content for the wrong disease/indication.">wrong_indication</span>
+    is the most serious — it means a person could be routed to wrong-disease content.</p>
+  <div class="statbar">
+    {% for status, n in data.citation_counts.items() %}
+    <span class="stat{{ ' ' if status == 'WRONG_INDICATION' else '' }}">
+      {% if status == 'WRONG_INDICATION' %}<span class="wrong" title="The model returned content for the wrong disease/indication."><b>{{ n }}</b> {{ status }}</span>
+      {% else %}<b>{{ n }}</b> {{ status }}{% endif %}
+    </span>
+    {% endfor %}
+  </div>
+</section>
+
+{# (b) Competitive positioning by model #}
 <section data-section="positioning">
-  <h2>Competitive positioning by LLM</h2>
+  <h2>Competitive positioning by model</h2>
+  <p class="section-note">How each model ranks the therapy against alternatives, counted by bucket.</p>
   {% if data.position_by_llm %}
   <table>
-    <thead><tr><th>LLM</th>{% for pos in data.position_order %}<th class="num">{{ pos }}</th>{% endfor %}</tr></thead>
+    <thead><tr><th>Model</th>{% for pos in data.position_order %}<th class="num">{{ pos }}</th>{% endfor %}</tr></thead>
     <tbody>
     {% for llm, counts in data.position_by_llm.items() %}
       <tr><td>{{ llm }}</td>
@@ -109,31 +282,43 @@
   {% endif %}
 </section>
 
-{# (c) Alert count + flagged-response list, with click-through to full text + rationale #}
+{# (c) Alerts + flagged-response list, with click-through to full text + rationale #}
 <section data-section="alerts">
   <h2>Alerts ({{ data.alert_count }}) — flagged responses</h2>
+  <p class="section-note">Each flagged response shows its question, the model, the rule that fired,
+    and a one-line reason. A truncated response was scored on partial text.</p>
   {% if data.flagged %}
     {% for f in data.flagged %}
-    <details>
-      <summary>
-        <span class="sev-{{ f.max_severity }}">[sev {{ f.max_severity }}]</span>
-        {{ f.response.llm_name }} · {{ f.response.persona }} · {{ f.response.therapeutic_area }}
-        — {% for a in f.alerts %}<span class="pill">{{ a.rule_fired }}</span> {% endfor %}
-      </summary>
-      <div class="body">
-        <strong>Why flagged:</strong>
-        <ul>{% for a in f.alerts %}<li class="sev-{{ a.severity }}">{{ a.rule_fired }}: {{ a.reason }}</li>{% endfor %}</ul>
-        {% if f.score %}
-        <strong>Scoring rationale:</strong> {{ f.score.scoring_rationale }}<br />
-        <strong>Sentiment:</strong> {{ "%.2f"|format(f.score.sentiment_score) }} ·
-        <strong>Position:</strong> {{ f.score.competitive_position }} ·
-        <strong>Citation:</strong> {{ f.score.citation_status }}<br />
-        {% if f.score.brand_mentions %}<strong>Brands:</strong> {{ f.score.brand_mentions|join(", ") }}<br />{% endif %}
-        {% endif %}
-        <strong>Full response text:</strong>
-        <div class="body">{{ f.response.response_text }}</div>
+    <div class="alert-card sev-{{ f.max_severity }}">
+      <div class="a-head">
+        <span class="badge sev-{{ f.max_severity }}">sev {{ f.max_severity }}</span>
+        <span class="a-id">{{ f.response.question_id }}</span>
+        <span class="tag muted">{{ f.response.llm_name }}</span>
+        <span class="tag muted">{{ f.response.persona }}</span>
+        {% for a in f.alerts %}<span class="pill">{{ a.rule_fired }}</span>{% endfor %}
+        {% if f.is_truncated %}<span class="pill warn">truncated / partial</span>{% endif %}
       </div>
-    </details>
+      {% if f.question_text %}<p class="a-q"><strong>Q:</strong> {{ f.question_text }}</p>{% endif %}
+      {% if f.is_truncated %}<p class="muted">Partial response — cut off at the token limit and scored
+        on the partial text.</p>{% endif %}
+      <ul class="a-reasons">
+        {% for a in f.alerts %}<li class="sev-{{ a.severity }}"><strong>{{ a.rule_fired }}:</strong> {{ a.reason }}</li>{% endfor %}
+      </ul>
+      {% if f.score %}
+      <details>
+        <summary>Full response text &amp; scoring rationale</summary>
+        <div class="body">
+          <strong>Scoring rationale:</strong> {{ f.score.scoring_rationale }}<br />
+          <strong>Sentiment:</strong> {{ "%+.2f"|format(f.score.sentiment_score) }} ·
+          <strong>Position:</strong> {{ f.score.competitive_position }} ·
+          <strong>Citation:</strong> {{ f.score.citation_status }}<br />
+          {% if f.score.brand_mentions %}<strong>Brands:</strong> {{ f.score.brand_mentions|join(", ") }}<br />{% endif %}
+          <strong>Full response text:</strong>
+          <div class="body">{{ f.response.response_text }}</div>
+        </div>
+      </details>
+      {% endif %}
+    </div>
     {% endfor %}
   {% else %}
   <p class="empty">No alerts in view.</p>
@@ -143,6 +328,8 @@
 {# (d) Response volume over time #}
 <section data-section="volume">
   <h2>Response volume over time</h2>
+  <p class="section-note">Captured responses per day — the longitudinal trail that makes
+    run-over-run comparison possible later.</p>
   {% if data.volume_by_date %}
   <table>
     <thead><tr><th>Date</th><th class="num">Responses</th><th>&nbsp;</th></tr></thead>

@@ -187,10 +187,10 @@ def test_dashboard_and_exports_are_produced(store, targets, tmp_path):
     out = write_static_report(store, tmp_path / "dashboard.html", generated_at="2026-06-13T00:00Z")
     assert out.exists()
     html = out.read_text(encoding="utf-8")
-    # Self-contained (inline styles, no external assets) with the four Reports sections present.
+    # Self-contained (inline styles, no external assets) with the Reports sections present.
     assert "<style" in html and "<link" not in html
     for marker in (
-        "Sentiment distribution",
+        "Sentiment by model",
         "Competitive positioning",
         "Alerts",
         "volume over time",

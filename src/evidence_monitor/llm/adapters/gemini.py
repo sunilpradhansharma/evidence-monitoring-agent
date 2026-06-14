@@ -40,6 +40,12 @@ class GeminiAdapter(BaseAdapter):
                     system_instruction=req.system_prompt,
                     temperature=params.temperature,
                     max_output_tokens=max_tokens,
+                    # gemini-2.5-flash is a thinking model: thinking tokens are billed as output and
+                    # count against max_output_tokens, starving the visible answer (the cause of the
+                    # TRUNCATED responses). We score the public-facing answer, not the reasoning, so
+                    # disable thinking — the whole budget goes to the answer, matching the other
+                    # targets and keeping cost flat.
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
                 ),
             )
         except errors.APIError as exc:  # pragma: no cover - live path only

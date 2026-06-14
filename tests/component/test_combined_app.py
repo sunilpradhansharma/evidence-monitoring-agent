@@ -54,9 +54,9 @@ def test_index_renders_both_tabs(client):
 def test_approvals_tab_lists_pending_questions(client):
     page = client.get("/", params={"tab": "approvals"})
     assert page.status_code == 200
-    # The pending queue is server-rendered with a name field (recorded on every action, SE-002).
+    # The pending queue is server-rendered with a reviewer-name field (recorded on every action).
     assert "Pending questions" in page.text
-    assert "Your name" in page.text
+    assert "Reviewer name" in page.text
     assert "data-question-id=" in page.text
 
 
@@ -107,15 +107,18 @@ def test_edit_creates_version_and_audits(client):
 
 
 # --------------------------------------------------------------------------- #
-# Score review scaffolded but OFF
+# Score review removed from the UI; the route stays wired but inert (returns 404)
 # --------------------------------------------------------------------------- #
 def test_score_review_disabled_returns_404(client):
-    # Default settings have the feature OFF, so the route is wired but inert.
+    # The Score-review tab is removed from the UI, but the route is wired and inert (FR-408).
     assert client.post("/score-review/RESP-1").status_code == 404
 
 
-def test_score_review_tab_marked_disabled_in_ui(client):
-    assert "disabled" in client.get("/", params={"tab": "reports"}).text
+def test_score_review_tab_removed_from_ui(client):
+    # Two tabs only — the Score-review tab is gone entirely (out of scope).
+    page = client.get("/", params={"tab": "reports"}).text
+    assert "Score review" not in page
+    assert ">Reports</a>" in page and ">Approvals</a>" in page
 
 
 # --------------------------------------------------------------------------- #
