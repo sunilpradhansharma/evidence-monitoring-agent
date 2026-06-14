@@ -6,6 +6,8 @@ Commands:
 - ``subset`` — run over a subset of approved questions filtered by persona / therapeutic area /
   domain.
 - ``health-check`` — verify connectivity to every configured target.
+- ``approve`` / ``reject`` — the scriptable path to the Medical Affairs approval workflow (the
+  same gate the web Approvals tab drives); records the approver and appends an audit entry.
 
 All targets, model ids, thresholds, the token budget, and the schedule come from config
 (Principles V/VIII); ``--mock`` (or ``EM_OFFLINE_MOCK``) runs fully offline with deterministic
@@ -20,7 +22,13 @@ import sys
 
 from evidence_monitor.alerts.rules import AlertThresholds
 from evidence_monitor.config.settings import Settings, get_settings
-from evidence_monitor.data_access.models import Domain, Persona, TriggerType
+from evidence_monitor.data_access.models import (
+    AuditEventType,
+    Domain,
+    Persona,
+    Question,
+    TriggerType,
+)
 from evidence_monitor.data_access.sqlite_store import SqliteStore
 from evidence_monitor.llm.adapters.base import HealthResult
 from evidence_monitor.llm.client import ClaudeClient
@@ -29,6 +37,8 @@ from evidence_monitor.observability.logging import get_logger, log_event
 from evidence_monitor.orchestrator import OrchestratorContext, RunManager
 from evidence_monitor.orchestrator import run as run_graph
 from evidence_monitor.orchestrator.state import QuestionFilter, RunState, RunSummary
+from evidence_monitor.question_repo.approval import ApprovalError, approval_audit_event
+from evidence_monitor.question_repo.repository import QuestionService
 from evidence_monitor.scoring.scorer import Scorer
 
 _LOGGER = get_logger("evidence_monitor.cli")
@@ -120,6 +130,35 @@ def cmd_dry_run(settings: Settings, *, mock: bool) -> bool:
     return ok
 
 
+def cmd_approve(store: SqliteStore, question_id: str, approver: str) -> Question:
+    """Approve a question through the shared workflow + append an audit entry (scriptable path)."""
+    question = QuestionService(store.questions).approve(question_id, approver)
+    store.audit.append(
+        approval_audit_event(
+            event_type=AuditEventType.QUESTION_APPROVED,
+            question_id=question_id,
+            approver=approver,
+        )
+    )
+    print(f"approved {question_id} (v{question.version}) by {approver}")
+    return question
+
+
+def cmd_reject(store: SqliteStore, question_id: str, approver: str, reason: str) -> Question:
+    """Reject a question through the shared workflow + append an audit entry (scriptable path)."""
+    question = QuestionService(store.questions).reject(question_id, approver, reason)
+    store.audit.append(
+        approval_audit_event(
+            event_type=AuditEventType.QUESTION_REJECTED,
+            question_id=question_id,
+            approver=approver,
+            reason=reason,
+        )
+    )
+    print(f"rejected {question_id} (v{question.version}) by {approver}: {reason}")
+    return question
+
+
 def _format_summary(s: RunSummary) -> str:
     lines = [
         f"run {s.run_id}",
@@ -155,6 +194,15 @@ def _build_parser() -> argparse.ArgumentParser:
     subset.add_argument("--persona", choices=[p.value for p in Persona])
     subset.add_argument("--therapeutic-area")
     subset.add_argument("--domain", choices=[d.value for d in Domain])
+
+    approve = sub.add_parser("approve", help="approve a question (Medical Affairs gate)")
+    approve.add_argument("question_id")
+    approve.add_argument("--approver", required=True, help="approver name (recorded, SE-002)")
+
+    reject = sub.add_parser("reject", help="reject a question (terminal; excluded from runs)")
+    reject.add_argument("question_id")
+    reject.add_argument("--approver", required=True, help="approver name (recorded, SE-002)")
+    reject.add_argument("--reason", required=True, help="rejection reason (recorded)")
     return parser
 
 
@@ -181,6 +229,23 @@ def main(argv: list[str] | None = None) -> int:
             store.close()
         return 0
 
+    if args.command in ("approve", "reject"):
+        store = SqliteStore(settings.db_path)
+        try:
+            if args.command == "approve":
+                cmd_approve(store, args.question_id, args.approver)
+            else:
+                cmd_reject(store, args.question_id, args.approver, args.reason)
+        except KeyError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        except ApprovalError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        finally:
+            store.close()
+        return 0
+
     ok = (
         cmd_dry_run(settings, mock=mock)
         if args.command == "dry-run"
@@ -196,8 +261,10 @@ if __name__ == "__main__":  # pragma: no cover
 __all__ = [
     "build_context",
     "check_targets",
+    "cmd_approve",
     "cmd_dry_run",
     "cmd_health_check",
+    "cmd_reject",
     "cmd_run",
     "main",
 ]

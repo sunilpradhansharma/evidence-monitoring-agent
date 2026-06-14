@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Evidence Monitoring — Local Console</title>
+  {% include "_styles.html" %}
+</head>
+<body>
+  <h1>Evidence Monitoring — Local Console</h1>
+  <p class="muted">Local-only (127.0.0.1) · no authentication (out of scope). Reports are read-only;
+    only the Approvals tab writes.</p>
+
+  <nav class="tabs">
+    <a href="/?tab=reports" class="{{ 'active' if active_tab == 'reports' else '' }}">Reports</a>
+    <a href="/?tab=approvals" class="{{ 'active' if active_tab == 'approvals' else '' }}">Approvals</a>
+    {% if score_review_enabled %}
+    <a href="/?tab=score-review" class="{{ 'active' if active_tab == 'score-review' else '' }}">Score review</a>
+    {% else %}
+    <a class="disabled" title="Scaffolded — disabled in this build (FR-408)">Score review</a>
+    {% endif %}
+  </nav>
+
+  {% if active_tab == 'approvals' %}
+  {# ---- Approvals tab (read-write) ------------------------------------------------------ #}
+  <section data-tab="approvals">
+    <h2>Pending questions ({{ pending|length }})</h2>
+    <div class="card">
+      <label>Your name (recorded on every action — SE-002)
+        <input type="text" id="approver" placeholder="e.g. j.smith" />
+      </label>
+      <p class="muted" id="action-status"></p>
+    </div>
+    {% if pending %}
+      {% for q in pending %}
+      <div class="card" data-question-id="{{ q.question_id }}">
+        <strong>{{ q.question_id }}</strong>
+        <span class="pill">{{ q.persona }}</span>
+        <span class="pill">{{ q.therapeutic_area }}</span>
+        <span class="pill">{{ q.domain }}</span>
+        <p>{{ q.question_text }}</p>
+        <div class="approve-form">
+          <input type="text" placeholder="rationale / rejection reason" class="reason" />
+          <button class="primary" onclick="act('{{ q.question_id }}', 'approve', this)">Approve</button>
+          <button class="danger" onclick="act('{{ q.question_id }}', 'reject', this)">Reject</button>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="empty">No pending questions.</p>
+    {% endif %}
+  </section>
+
+  <script>
+    async function act(qid, action, btn) {
+      const approver = document.getElementById('approver').value.trim();
+      const status = document.getElementById('action-status');
+      if (!approver) { status.textContent = 'Enter your name before approving/rejecting.'; return; }
+      const card = btn.closest('[data-question-id]');
+      const reason = card.querySelector('.reason').value.trim();
+      if (action === 'reject' && !reason) { status.textContent = 'A reason is required to reject.'; return; }
+      const body = action === 'reject'
+        ? { approver_name: approver, reason: reason }
+        : { approver_name: approver };
+      const resp = await fetch(`/approvals/questions/${qid}/${action}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      if (resp.ok) { window.location.href = '/?tab=approvals'; }
+      else { const e = await resp.json(); status.textContent = `Error ${resp.status}: ${e.detail || 'failed'}`; }
+    }
+  </script>
+
+  {% elif active_tab == 'score-review' and score_review_enabled %}
+  <section data-tab="score-review">
+    <h2>Score review (FR-408)</h2>
+    <p class="muted">Human override of an AI score — stored as a NEW versioned scoring record; the
+      AI score is retained, never deleted.</p>
+  </section>
+
+  {% else %}
+  {# ---- Reports tab (read-only) — same render path as the static export ------------------ #}
+  <section data-tab="reports">
+    {% include "reports_section.html" %}
+  </section>
+  {% endif %}
+</body>
+</html>

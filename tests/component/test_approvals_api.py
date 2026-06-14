@@ -113,8 +113,13 @@ def test_edit_with_no_fields_400(client):
 
 
 def test_no_submit_endpoint_exists(client):
-    """Advisory invariant (Principle I): the API exposes no route that submits to an LLM."""
+    """Advisory invariant (Principle I): no route submits to an LLM, and the ONLY writes are
+    local Medical Affairs approvals (Reports stay read-only)."""
     paths = client.app.openapi()["paths"]
-    assert not any("submit" in p or "run" in p for p in paths)
-    # Every exposed path is under the read-only-ish /approvals namespace for this slice.
-    assert all(p.startswith("/approvals") for p in paths)
+    # No endpoint submits a question to an external model.
+    assert not any("submit" in p for p in paths)
+    # Every mutating method lives under /approvals (or the scaffolded, disabled /score-review).
+    for path, methods in paths.items():
+        for method in methods:
+            if method.lower() in {"post", "put", "patch", "delete"}:
+                assert path.startswith(("/approvals", "/score-review")), (method, path)

@@ -16,7 +16,16 @@ Re-asserting the current state is an idempotent no-op (no new version). Any othe
 from __future__ import annotations
 
 from evidence_monitor.data_access.interface import QuestionRepository
-from evidence_monitor.data_access.models import ApprovalStatus, Question
+from evidence_monitor.data_access.models import (
+    ApprovalStatus,
+    AuditEvent,
+    AuditEventType,
+    Question,
+)
+
+# Curation actions are auditable (Principle II) but happen outside any run, so they carry a
+# sentinel, non-secret run id rather than a real ``run_id``.
+APPROVAL_AUDIT_RUN_ID = "approvals"
 
 # Allowed forward transitions. REJECTED is terminal (empty set).
 _ALLOWED: dict[ApprovalStatus, set[ApprovalStatus]] = {
@@ -66,4 +75,39 @@ def reject(
     return _transition(repo, question_id, ApprovalStatus.REJECTED, approver, reason)
 
 
-__all__ = ["ApprovalError", "approve", "reject"]
+def approval_audit_event(
+    *,
+    event_type: AuditEventType,
+    question_id: str,
+    approver: str,
+    reason: str | None = None,
+) -> AuditEvent:
+    """Build the append-only audit entry for one curation action (approve / reject / edit).
+
+    ``detail`` is a short, non-secret sentence; the approver name is operator-supplied curation
+    metadata (SE-002), not a credential, so it is recorded for the compliance trail.
+    """
+    verb = {
+        AuditEventType.QUESTION_APPROVED: "approved",
+        AuditEventType.QUESTION_REJECTED: "rejected",
+        AuditEventType.QUESTION_EDITED: "edited",
+    }[event_type]
+    detail = f"{approver} {verb} question {question_id}"
+    if reason:
+        detail = f"{detail}: {reason}"
+    return AuditEvent(
+        run_id=APPROVAL_AUDIT_RUN_ID,
+        event_type=event_type,
+        role="MEDICAL_AFFAIRS",
+        target=question_id,
+        detail=detail,
+    )
+
+
+__all__ = [
+    "APPROVAL_AUDIT_RUN_ID",
+    "ApprovalError",
+    "approval_audit_event",
+    "approve",
+    "reject",
+]

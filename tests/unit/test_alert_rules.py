@@ -59,9 +59,7 @@ def test_wrong_indication_fires_at_highest_severity_only_when_wrong():
     fired = evaluate(_record(citation_status=CitationStatus.WRONG_INDICATION))
     assert [f.rule for f in fired] == [AlertRule.WRONG_INDICATION]
     # A correct (or any non-WRONG) citation status does not fire it.
-    assert AlertRule.WRONG_INDICATION not in _fired(
-        _record(citation_status=CitationStatus.PARTIAL)
-    )
+    assert AlertRule.WRONG_INDICATION not in _fired(_record(citation_status=CitationStatus.PARTIAL))
 
 
 def test_competitor_higher_fires_only_with_sufficient_margin():

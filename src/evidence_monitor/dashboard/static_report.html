@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Evidence Monitoring — Reports</title>
+  {% include "_styles.html" %}
+</head>
+<body>
+  <h1>Evidence Monitoring — Reports</h1>
+  <p class="muted">
+    Self-contained export — no software required.
+    {% if generated_at %}Generated {{ generated_at }}.{% endif %}
+  </p>
+  {% include "reports_section.html" %}
+</body>
+</html>

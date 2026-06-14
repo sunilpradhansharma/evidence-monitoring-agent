@@ -12,9 +12,7 @@ from evidence_monitor.data_access.models import ApprovalStatus
 from evidence_monitor.data_access.sqlite_store import SqliteStore
 from evidence_monitor.orchestrator.state import RunSummary
 
-TARGETS_CFG = str(
-    Path(__file__).resolve().parents[2] / "src/evidence_monitor/config/targets.yaml"
-)
+TARGETS_CFG = str(Path(__file__).resolve().parents[2] / "src/evidence_monitor/config/targets.yaml")
 
 
 def _settings(**overrides) -> Settings:

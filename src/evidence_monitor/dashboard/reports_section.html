@@ -1,0 +1,149 @@
+{# The four Reports sections (FR-023) + drill-down (FR-024). Shared by the static export and the
+   served Reports tab. `interactive` toggles the live filter form vs. a static "filters applied"
+   line. Read-only: this fragment renders aggregates, it never mutates anything. #}
+
+{% if interactive %}
+<form class="filters" method="get" action="/">
+  <input type="hidden" name="tab" value="reports" />
+  <label>Persona
+    <select name="persona">
+      <option value="">All</option>
+      {% for p in data.options.personas %}
+      <option value="{{ p }}" {% if data.filters.persona == p %}selected{% endif %}>{{ p }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Therapeutic area
+    <select name="therapeutic_area">
+      <option value="">All</option>
+      {% for ta in data.options.therapeutic_areas %}
+      <option value="{{ ta }}" {% if data.filters.therapeutic_area == ta %}selected{% endif %}>{{ ta }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>LLM
+    <select name="llm">
+      <option value="">All</option>
+      {% for m in data.options.llms %}
+      <option value="{{ m }}" {% if data.filters.llm == m %}selected{% endif %}>{{ m }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>From<input type="date" name="date_from" value="{{ data.filters.date_from }}" /></label>
+  <label>To<input type="date" name="date_to" value="{{ data.filters.date_to }}" /></label>
+  <button type="submit" class="primary">Apply</button>
+  <a href="/?tab=reports"><button type="button">Reset</button></a>
+</form>
+{% else %}
+<p class="muted">
+  Filters applied:
+  {% if data.filters %}
+    {% for k, v in data.filters.items() %}<span class="pill">{{ k }}={{ v }}</span> {% endfor %}
+  {% else %}none (all responses){% endif %}
+</p>
+{% endif %}
+
+<p class="muted">{{ data.total_responses }} response(s) in view · {{ data.alert_count }} alert(s).</p>
+
+{# (a) Sentiment distribution by LLM and therapy #}
+<section data-section="sentiment">
+  <h2>Sentiment distribution by LLM and therapy</h2>
+  {% if data.sentiment_by_llm %}
+  <h3 class="muted">By LLM</h3>
+  <table>
+    <thead><tr><th>LLM</th><th class="num">Scored</th><th class="num">Avg</th>
+      <th class="num pos">+</th><th class="num neu">0</th><th class="num neg">−</th></tr></thead>
+    <tbody>
+    {% for llm, agg in data.sentiment_by_llm.items() %}
+      <tr><td>{{ llm }}</td><td class="num">{{ agg.count }}</td>
+        <td class="num">{{ "%.2f"|format(agg.average) }}</td>
+        <td class="num pos">{{ agg.positive }}</td><td class="num neu">{{ agg.neutral }}</td>
+        <td class="num neg">{{ agg.negative }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <h3 class="muted">By therapeutic area</h3>
+  <table>
+    <thead><tr><th>Therapeutic area</th><th class="num">Scored</th><th class="num">Avg</th>
+      <th class="num pos">+</th><th class="num neu">0</th><th class="num neg">−</th></tr></thead>
+    <tbody>
+    {% for ta, agg in data.sentiment_by_therapy.items() %}
+      <tr><td>{{ ta }}</td><td class="num">{{ agg.count }}</td>
+        <td class="num">{{ "%.2f"|format(agg.average) }}</td>
+        <td class="num pos">{{ agg.positive }}</td><td class="num neu">{{ agg.neutral }}</td>
+        <td class="num neg">{{ agg.negative }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No scored responses in view.</p>
+  {% endif %}
+</section>
+
+{# (b) Competitive positioning by LLM #}
+<section data-section="positioning">
+  <h2>Competitive positioning by LLM</h2>
+  {% if data.position_by_llm %}
+  <table>
+    <thead><tr><th>LLM</th>{% for pos in data.position_order %}<th class="num">{{ pos }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for llm, counts in data.position_by_llm.items() %}
+      <tr><td>{{ llm }}</td>
+        {% for pos in data.position_order %}<td class="num">{{ counts.get(pos, 0) }}</td>{% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No scored responses in view.</p>
+  {% endif %}
+</section>
+
+{# (c) Alert count + flagged-response list, with click-through to full text + rationale #}
+<section data-section="alerts">
+  <h2>Alerts ({{ data.alert_count }}) — flagged responses</h2>
+  {% if data.flagged %}
+    {% for f in data.flagged %}
+    <details>
+      <summary>
+        <span class="sev-{{ f.max_severity }}">[sev {{ f.max_severity }}]</span>
+        {{ f.response.llm_name }} · {{ f.response.persona }} · {{ f.response.therapeutic_area }}
+        — {% for a in f.alerts %}<span class="pill">{{ a.rule_fired }}</span> {% endfor %}
+      </summary>
+      <div class="body">
+        <strong>Why flagged:</strong>
+        <ul>{% for a in f.alerts %}<li class="sev-{{ a.severity }}">{{ a.rule_fired }}: {{ a.reason }}</li>{% endfor %}</ul>
+        {% if f.score %}
+        <strong>Scoring rationale:</strong> {{ f.score.scoring_rationale }}<br />
+        <strong>Sentiment:</strong> {{ "%.2f"|format(f.score.sentiment_score) }} ·
+        <strong>Position:</strong> {{ f.score.competitive_position }} ·
+        <strong>Citation:</strong> {{ f.score.citation_status }}<br />
+        {% if f.score.brand_mentions %}<strong>Brands:</strong> {{ f.score.brand_mentions|join(", ") }}<br />{% endif %}
+        {% endif %}
+        <strong>Full response text:</strong>
+        <div class="body">{{ f.response.response_text }}</div>
+      </div>
+    </details>
+    {% endfor %}
+  {% else %}
+  <p class="empty">No alerts in view.</p>
+  {% endif %}
+</section>
+
+{# (d) Response volume over time #}
+<section data-section="volume">
+  <h2>Response volume over time</h2>
+  {% if data.volume_by_date %}
+  <table>
+    <thead><tr><th>Date</th><th class="num">Responses</th><th>&nbsp;</th></tr></thead>
+    <tbody>
+    {% for day, count in data.volume_by_date.items() %}
+      <tr><td>{{ day }}</td><td class="num">{{ count }}</td>
+        <td><span class="bar" style="width: {{ count * 12 }}px"></span></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No responses in view.</p>
+  {% endif %}
+</section>

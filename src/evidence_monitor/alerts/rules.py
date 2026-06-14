@@ -74,9 +74,7 @@ def evaluate(
             )
         )
     if record.competitive_position is CompetitivePosition.NOT_RECOMMENDED:
-        fired.append(
-            FiredRule(AlertRule.NOT_RECOMMENDED, "our therapy was marked NOT_RECOMMENDED")
-        )
+        fired.append(FiredRule(AlertRule.NOT_RECOMMENDED, "our therapy was marked NOT_RECOMMENDED"))
     if competitor_sentiments:
         for sentiment in competitor_sentiments.values():
             if sentiment - record.sentiment_score >= thresholds.competitor_margin:

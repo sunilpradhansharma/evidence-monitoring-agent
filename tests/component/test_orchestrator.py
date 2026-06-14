@@ -207,9 +207,11 @@ def test_resume_skips_completed_questions_without_duplicates(store, targets):
 
     # Resume scores the WHOLE run, including the responses captured before the interruption.
     assert len(final.scores) == 9
-    run_responses = ResponseService(store.responses).query(
-        QueryFilters(run_id=interrupted.run_id), page_size=None
-    ).items
+    run_responses = (
+        ResponseService(store.responses)
+        .query(QueryFilters(run_id=interrupted.run_id), page_size=None)
+        .items
+    )
     assert all(store.scores.latest_for(r.response_id) is not None for r in run_responses)
 
 

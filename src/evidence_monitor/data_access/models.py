@@ -103,6 +103,10 @@ class AuditEventType(StrEnum):
     RUN_STARTED = "RUN_STARTED"
     RUN_ENDED = "RUN_ENDED"
     ERROR = "ERROR"
+    # Medical Affairs curation actions (US3) — auditable but not tied to a run.
+    QUESTION_APPROVED = "QUESTION_APPROVED"
+    QUESTION_REJECTED = "QUESTION_REJECTED"
+    QUESTION_EDITED = "QUESTION_EDITED"
 
 
 # Severity ordering for alerts — higher number = more severe. WRONG_INDICATION

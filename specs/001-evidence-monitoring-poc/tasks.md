@@ -172,15 +172,15 @@ Reports API, and a run summary — no install.
 **Independent Test**: After a scored run, open `dashboard.html`, verify the 4 sections + drill-down,
 export CSV/JSON, and fetch the run summary.
 
-- [ ] T070 [US5] Create the dashboard Jinja2 template in `src/evidence_monitor/dashboard/template.html`
-- [ ] T071 [US5] Implement self-contained HTML render (sentiment distribution, competitive positioning, alerts, volume-over-time) + CSV/JSON export in `src/evidence_monitor/dashboard/render.py`
-- [ ] T072 [P] [US5] Component test for dashboard render + exports in `tests/component/test_dashboard_render.py`
-- [ ] T073 [US5] Implement the read-only Reports endpoints (responses, drill-down, export, alerts) in `src/evidence_monitor/api.py` per contracts/rest-api.md
-- [ ] T074 [P] [US5] Component test for the Reports API in `tests/component/test_reports_api.py`
-- [ ] T075 [US5] Implement the run summary (run_id, timings, captured-by-status, alert count, tokens) via `src/evidence_monitor/orchestrator/run_manager.py` and `GET /reports/runs/{run_id}/summary`
-- [ ] T076 [P] [US5] Component test for the run summary in `tests/component/test_run_summary.py`
-- [ ] T077 [US5] Implement the `/health` endpoint (shared preflight) in `src/evidence_monitor/api.py`
-- [ ] T078 [P] [US5] Component test for `/health` (ok + degraded) in `tests/component/test_health_endpoint.py`
+- [X] T070 [US5] Create the dashboard Jinja2 template in `src/evidence_monitor/dashboard/template.html` (tabbed app shell + `reports_section.html` / `static_report.html` / `_styles.html` partials)
+- [X] T071 [US5] Implement self-contained HTML render (sentiment distribution, competitive positioning, alerts, volume-over-time) + CSV/JSON export in `src/evidence_monitor/dashboard/render.py` (one render path shared by the served Reports tab and the static export, FR-603)
+- [X] T072 [P] [US5] Component test for dashboard render + exports in `tests/component/test_reports_view.py`
+- [X] T073 [US5] Implement the read-only Reports endpoints (responses, drill-down, export, alerts) in `src/evidence_monitor/api.py` per contracts/rest-api.md
+- [X] T074 [P] [US5] Component test for the Reports API in `tests/component/test_reports_view.py`
+- [X] T075 [US5] Implement the run summary (run_id, timings, captured-by-status, alert count, tokens) via `GET /reports/runs/{run_id}/summary` in `src/evidence_monitor/api.py`
+- [X] T076 [P] [US5] Component test for the run summary in `tests/component/test_reports_view.py`
+- [X] T077 [US5] Implement the `/health` endpoint (shared credential preflight) in `src/evidence_monitor/api.py` + `config/settings.py`
+- [X] T078 [P] [US5] Component test for `/health` (ok + degraded) in `tests/component/test_combined_app.py`
 
 **Checkpoint**: Findings are consumable by stakeholders without install.
 

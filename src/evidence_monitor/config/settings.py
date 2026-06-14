@@ -64,6 +64,33 @@ class Settings(BaseSettings):
     )
     retry_max_attempts: int = Field(default=3, validation_alias="EM_RETRY_MAX_ATTEMPTS")
 
+    # --- Feature flags ---
+    # FR-408 human score-override review is scaffolded but OFF by default for the POC.
+    enable_score_review: bool = Field(default=False, validation_alias="EM_ENABLE_SCORE_REVIEW")
+
+
+# Required credentials for the unconditional targets. Open Evidence is conditional and is checked
+# only when that target is enabled, so it is not required here (FR-007). Each entry maps a settings
+# field to the environment variable name surfaced in a non-secret preflight error.
+_REQUIRED_CREDENTIALS: tuple[tuple[str, str], ...] = (
+    ("anthropic_api_key", "ANTHROPIC_API_KEY"),
+    ("openai_api_key", "OPENAI_API_KEY"),
+    ("google_api_key", "GOOGLE_API_KEY"),
+)
+
+
+def credential_preflight(settings: Settings) -> list[str]:
+    """Return the env-var names of any missing required credentials (empty ⇒ all present).
+
+    Presence-only check (no secret value is ever read or logged). The web ``/health`` endpoint and
+    the CLI preflight share this so the same gate is exposed everywhere (FR-032).
+    """
+    return [
+        env_name
+        for field_name, env_name in _REQUIRED_CREDENTIALS
+        if getattr(settings, field_name) is None
+    ]
+
 
 @lru_cache
 def get_settings() -> Settings:
