@@ -59,6 +59,9 @@ class RunSummary:
     total_tokens: int
     est_cost: float
     budget_exhausted: bool = False  # the run paused on the token budget before finishing the bank
+    # FAILED captures grouped by non-secret error_class (e.g. {"AuthenticationError": 69}); empty
+    # when there were no failures. Surfaces *why* a run failed, not just the count.
+    failures_by_error_class: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass

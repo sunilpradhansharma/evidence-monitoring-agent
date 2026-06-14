@@ -65,6 +65,8 @@ def row_to_response(r: sqlite3.Row) -> Response:
         finish_reason=FinishReason(r["finish_reason"]),
         status=ResponseStatus(r["status"]),
         block_reason=r["block_reason"],
+        error_class=r["error_class"],
+        error_message=r["error_message"],
         alert_triggered=_alert_triggered(r),
         created_at=r["created_at"],
     )

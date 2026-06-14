@@ -30,7 +30,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Res
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from evidence_monitor.config.settings import Settings, credential_preflight, get_settings
-from evidence_monitor.dashboard.render import build_report, render_app
+from evidence_monitor.dashboard.render import (
+    build_approved_questions,
+    build_report,
+    render_app,
+)
 from evidence_monitor.data_access.interface import DataAccess, QueryFilters
 from evidence_monitor.data_access.models import (
     ApprovalStatus,
@@ -191,13 +195,23 @@ def _register_ui(app: FastAPI) -> None:
     def index(request: Request, store: StoreDep, settings: SettingsDep) -> HTMLResponse:
         """Serve the tabbed console. The Reports tab uses the same render path as the export."""
         active_tab = request.query_params.get("tab", "reports")
-        report = build_report(store, _filters_from_params(request.query_params))
+        params = request.query_params
+        report = build_report(store, _filters_from_params(params))
         pending = QuestionService(store.questions).list_questions(
             approval_status=ApprovalStatus.PENDING, active=True
+        )
+        # Read-only approved-questions view (Approvals tab) — through the question-repo read path.
+        approved_view = build_approved_questions(
+            store,
+            persona=params.get("persona") or None,
+            therapeutic_area=params.get("therapeutic_area") or None,
+            domain=params.get("domain") or None,
+            search=params.get("search") or None,
         )
         html = render_app(
             report,
             pending_questions=pending,
+            approved_view=approved_view,
             active_tab=active_tab,
             score_review_enabled=settings.enable_score_review,
         )

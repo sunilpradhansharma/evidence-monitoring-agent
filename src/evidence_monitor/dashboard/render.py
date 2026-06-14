@@ -25,12 +25,14 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from evidence_monitor.data_access.interface import DataAccess, QueryFilters
 from evidence_monitor.data_access.models import (
     Alert,
+    ApprovalStatus,
     CompetitivePosition,
     Domain,
     Persona,
     Question,
     ScoringRecord,
 )
+from evidence_monitor.question_repo.repository import QuestionService
 from evidence_monitor.response_repo.schema import Response
 
 # Sentiment buckets for the distribution view. Mirrors the default alert margins so the picture a
@@ -207,6 +209,83 @@ def _filter_echo(filters: QueryFilters) -> dict[str, str]:
 
 
 # --------------------------------------------------------------------------- #
+# Approved-questions view (Approvals tab, READ-ONLY) — through the question-repo read path
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class ApprovalOptions:
+    """Filter-dropdown choices for the approved-questions view (content-agnostic enums + the
+    therapeutic areas actually present in the approved set)."""
+
+    personas: list[str] = field(default_factory=lambda: [p.value for p in Persona])
+    domains: list[str] = field(default_factory=lambda: [d.value for d in Domain])
+    therapeutic_areas: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ApprovedQuestionsView:
+    """Everything the read-only approved-questions section needs: the filtered rows (current
+    versions only), the count for the header, the dropdown options, and the echoed filters."""
+
+    questions: list[Question]
+    total: int
+    options: ApprovalOptions
+    filters: dict[str, str]
+
+
+def build_approved_questions(
+    store: DataAccess,
+    *,
+    persona: str | None = None,
+    therapeutic_area: str | None = None,
+    domain: str | None = None,
+    search: str | None = None,
+) -> ApprovedQuestionsView:
+    """Assemble the read-only APPROVED + active question view via the question-repository read path.
+
+    Reads through :meth:`QuestionService.list_questions` (the same path the Approvals API uses) —
+    never SQL — and applies the persona / therapeutic-area / domain / free-text filters and the
+    stable ``question_id`` sort as view logic. ``search`` matches ``question_id`` or
+    ``question_text`` case-insensitively. Only current (latest) versions are returned; history is
+    not fabricated.
+    """
+    approved = QuestionService(store.questions).list_questions(
+        approval_status=ApprovalStatus.APPROVED, active=True
+    )
+    options = ApprovalOptions(
+        therapeutic_areas=sorted({q.therapeutic_area for q in approved}),
+    )
+
+    rows = approved
+    if persona:
+        rows = [q for q in rows if str(q.persona) == persona]
+    if therapeutic_area:
+        rows = [q for q in rows if q.therapeutic_area == therapeutic_area]
+    if domain:
+        rows = [q for q in rows if str(q.domain) == domain]
+    if search:
+        needle = search.strip().lower()
+        rows = [
+            q
+            for q in rows
+            if needle in q.question_id.lower() or needle in q.question_text.lower()
+        ]
+    rows = sorted(rows, key=lambda q: q.question_id)
+
+    applied = {
+        "persona": persona or "",
+        "therapeutic_area": therapeutic_area or "",
+        "domain": domain or "",
+        "search": search or "",
+    }
+    return ApprovedQuestionsView(
+        questions=rows,
+        total=len(rows),
+        options=options,
+        filters={k: v for k, v in applied.items() if v},
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Rendering
 # --------------------------------------------------------------------------- #
 def render_reports_section(data: ReportData, *, interactive: bool) -> str:
@@ -231,16 +310,21 @@ def render_app(
     data: ReportData,
     *,
     pending_questions: list[Question],
+    approved_view: ApprovedQuestionsView | None = None,
     active_tab: str = "reports",
     score_review_enabled: bool = False,
 ) -> str:
-    """Render the tabbed local web app (Reports + Approvals + scaffolded Score-review)."""
+    """Render the tabbed local web app (Reports + Approvals + scaffolded Score-review).
+
+    ``approved_view`` feeds the read-only "Approved questions (N)" section on the Approvals tab.
+    """
     return (
         _env()
         .get_template("template.html")
         .render(
             data=data,
             pending=pending_questions,
+            approved=approved_view,
             active_tab=active_tab,
             score_review_enabled=score_review_enabled,
             interactive=True,
@@ -264,10 +348,13 @@ def write_static_report(
 
 
 __all__ = [
+    "ApprovalOptions",
+    "ApprovedQuestionsView",
     "FlaggedResponse",
     "ReportData",
     "ReportOptions",
     "SentimentAgg",
+    "build_approved_questions",
     "build_report",
     "render_app",
     "render_reports_section",

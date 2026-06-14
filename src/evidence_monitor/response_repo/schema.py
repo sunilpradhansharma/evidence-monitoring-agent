@@ -56,6 +56,11 @@ class Response(BaseModel):
     status: ResponseStatus
     block_reason: str | None = None  # populated when status is BLOCKED
 
+    # Populated when status is FAILED so a failure is never silent (FR-031): a stable, groupable
+    # ``error_class`` (the originating exception type) and a redacted, NON-SECRET ``error_message``.
+    error_class: str | None = None
+    error_message: str | None = None
+
     # Denormalized convenience flag maintained by the alert layer; never decided here.
     alert_triggered: bool = False
 

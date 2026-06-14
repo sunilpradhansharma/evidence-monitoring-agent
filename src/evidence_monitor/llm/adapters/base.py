@@ -34,6 +34,7 @@ from evidence_monitor.data_access.models import (
     Persona,
     ResponseStatus,
 )
+from evidence_monitor.observability.logging import redact
 
 # Default retry/backoff budget (FR-010). Backoff for attempt *n* is ``base * 2**(n-1)`` → 2/4/8s.
 _DEFAULT_MAX_ATTEMPTS = 3
@@ -131,6 +132,11 @@ class AdapterResult:
     model_version: str
     block_reason: str | None
     attempts: int
+    # On a FAILED capture, the non-secret cause so a failure is never silent: ``error_class`` is a
+    # stable, groupable label (the originating exception type) and ``error_message`` is the redacted
+    # detail (FR-031). Both are None for any non-FAILED status.
+    error_class: str | None = None
+    error_message: str | None = None
 
 
 @dataclass(frozen=True)
@@ -139,6 +145,20 @@ class HealthResult:
 
     reachable: bool
     detail: str
+    # True when the target was deliberately NOT probed (inactive in config). A skipped target is
+    # neither reachable nor unreachable — it is reported distinctly and excluded from the all-OK
+    # verdict, so an inactive target is never reported "live".
+    skipped: bool = False
+
+
+def _classify_error(exc: BaseException) -> tuple[str, str]:
+    """Map an exception to a stable, NON-SECRET ``(error_class, redacted_message)`` for a failure
+    record. ``error_class`` prefers the original cause's type name (e.g. ``AuthenticationError``,
+    ``APITimeoutError``) since adapters wrap provider errors via ``raise … from exc``; that makes
+    failures groupable by real root cause. The message is redacted so no secret reaches a row."""
+    cause = exc.__cause__
+    error_class = type(cause).__name__ if cause is not None else type(exc).__name__
+    return error_class, redact(str(exc))
 
 
 @runtime_checkable
@@ -203,8 +223,10 @@ class BaseAdapter:
         try:
             self._rate_limit()
             return self._run(req, params)
-        except Exception:  # backstop — no exception ever escapes submit (Principle IX)
-            # The exception is intentionally not surfaced verbatim (it may carry provider detail).
+        except Exception as exc:  # backstop — no exception ever escapes submit (Principle IX)
+            # No exception is surfaced verbatim, but its NON-SECRET class + redacted message ARE
+            # recorded on the FAILED result so the cause is never lost (was previously swallowed).
+            error_class, message = _classify_error(exc)
             return AdapterResult(
                 status=ResponseStatus.FAILED,
                 response_text="",
@@ -213,6 +235,8 @@ class BaseAdapter:
                 model_version=params.model_version,
                 block_reason=None,
                 attempts=1,
+                error_class=error_class,
+                error_message=message,
             )
 
     def health(self) -> HealthResult:
@@ -228,11 +252,20 @@ class BaseAdapter:
         last: _RawCompletion | None = None
 
         for bump in range(params.max_length_bumps + 1):
-            raw, used = self._fetch_with_retries(req, max_tokens, params)
+            raw, used, error = self._fetch_with_retries(req, max_tokens, params)
             total_attempts += used
             if raw is None:  # transient budget exhausted or permanent error → FAILED
+                error_class, message = _classify_error(error) if error else (None, None)
                 return AdapterResult(
-                    ResponseStatus.FAILED, "", 0, FinishReason.ERROR, mv, None, total_attempts
+                    ResponseStatus.FAILED,
+                    "",
+                    0,
+                    FinishReason.ERROR,
+                    mv,
+                    None,
+                    total_attempts,
+                    error_class=error_class,
+                    error_message=message,
                 )
             if raw.kind is _Kind.SAFETY:
                 return AdapterResult(
@@ -278,21 +311,27 @@ class BaseAdapter:
 
     def _fetch_with_retries(
         self, req: _Request, max_tokens: int, params: TargetParams
-    ) -> tuple[_RawCompletion | None, int]:
-        """One logical fetch with transient retry + backoff. Returns (completion|None, attempts)."""
+    ) -> tuple[_RawCompletion | None, int, Exception | None]:
+        """One logical fetch with transient retry + backoff.
+
+        Returns ``(completion|None, attempts, last_error|None)``. On failure the last exception is
+        returned (not swallowed) so the FAILED result can record its non-secret class + message.
+        """
         attempts = 0
+        last_error: Exception | None = None
         for attempt in range(1, params.max_attempts + 1):
             attempts += 1
             try:
-                return self._fetch(req, params, max_tokens, attempts), attempts
-            except TransientAdapterError:
+                return self._fetch(req, params, max_tokens, attempts), attempts, None
+            except TransientAdapterError as exc:
+                last_error = exc
                 if attempt < params.max_attempts:
                     self._sleep(params.backoff_for(attempt))
                     continue
-                return None, attempts  # budget exhausted → FAILED
-            except AdapterError:
-                return None, attempts  # permanent → FAILED, no retry
-        return None, attempts
+                return None, attempts, exc  # budget exhausted → FAILED
+            except AdapterError as exc:
+                return None, attempts, exc  # permanent → FAILED, no retry
+        return None, attempts, last_error
 
     def _fetch(
         self, req: _Request, params: TargetParams, max_tokens: int, attempt: int
@@ -341,7 +380,27 @@ class BaseAdapter:
         raise NotImplementedError("concrete adapters implement _call_live")
 
     def _health_live(self) -> HealthResult:
-        return HealthResult(reachable=True, detail=f"{self.name}: live (verified at preflight)")
+        """A minimal REAL round-trip over the same ``_call_live`` path ``submit()`` uses, so health
+        reflects ACTUAL reachability — key present and valid, model id accepted, endpoint live —
+        rather than a fabricated string. A tiny prompt with a small token cap keeps the cost
+        negligible. Any outcome that completes the call (including a length/safety result) proves
+        reachability; only an exception means unreachable. Non-secret detail only."""
+        probe = _Request(
+            question_text="ping",
+            persona=Persona.PROSPECT,
+            system_prompt="Reply with the single word: ok.",
+        )
+        try:
+            self._call_live(probe, self._default_params, 16, attempt=1)
+        except Exception as exc:
+            error_class, message = _classify_error(exc)
+            return HealthResult(
+                reachable=False, detail=f"{self.name}: UNREACHABLE [{error_class}] {message}"
+            )
+        return HealthResult(
+            reachable=True,
+            detail=f"{self.name}: live (real round-trip OK, {self._default_params.model_version})",
+        )
 
 
 __all__ = [

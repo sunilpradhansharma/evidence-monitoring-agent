@@ -51,6 +51,75 @@
     {% endif %}
   </section>
 
+  {# ---- Approved questions (READ-ONLY) — same Approvals tab, no write actions --------------- #}
+  {% if approved %}
+  <section data-tab="approved-questions">
+    <h2>Approved questions ({{ approved.total }})</h2>
+    <p class="muted">Read-only. APPROVED + active questions (current version), via the
+      question-repository read path. To change approval, use the Pending queue above.</p>
+    <form class="filters" method="get" action="/">
+      <input type="hidden" name="tab" value="approvals" />
+      <label>Persona
+        <select name="persona">
+          <option value="">All</option>
+          {% for p in approved.options.personas %}
+          <option value="{{ p }}" {% if approved.filters.persona == p %}selected{% endif %}>{{ p }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Therapeutic area
+        <select name="therapeutic_area">
+          <option value="">All</option>
+          {% for ta in approved.options.therapeutic_areas %}
+          <option value="{{ ta }}" {% if approved.filters.therapeutic_area == ta %}selected{% endif %}>{{ ta }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Domain
+        <select name="domain">
+          <option value="">All</option>
+          {% for d in approved.options.domains %}
+          <option value="{{ d }}" {% if approved.filters.domain == d %}selected{% endif %}>{{ d }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Search<input type="search" name="search" placeholder="id or text" value="{{ approved.filters.search }}" /></label>
+      <button type="submit" class="primary">Apply</button>
+      <a href="/?tab=approvals"><button type="button">Reset</button></a>
+    </form>
+
+    {% if approved.questions %}
+    <table>
+      <thead><tr>
+        <th>question_id</th><th>persona</th><th>therapeutic_area</th><th>brand_focus</th>
+        <th>domain</th><th>status</th><th>approver_name</th><th>note</th>
+        <th class="num">ver</th><th>updated (UTC)</th><th>question_text</th>
+      </tr></thead>
+      <tbody>
+      {% for q in approved.questions %}
+        <tr>
+          <td>{{ q.question_id }}</td>
+          <td>{{ q.persona }}</td>
+          <td>{{ q.therapeutic_area }}</td>
+          <td>{{ q.brand_focus }}</td>
+          <td>{{ q.domain }}</td>
+          <td>{{ q.approval_status }}</td>
+          <td>{{ q.approver_name if q.approver_name is not none else "—" }}</td>
+          <td>{{ q.approval_note if q.approval_note is not none else "—" }}</td>
+          <td class="num">{{ q.version }}{% if q.version > 1 %} <span class="pill" title="Edited/re-approved; prior versions retained">versioned</span>{% endif %}</td>
+          <td>{{ q.updated_at.strftime("%Y-%m-%d %H:%M") if q.updated_at.strftime is defined else q.updated_at }}</td>
+          <td><details><summary>{{ q.question_text[:60] }}{% if q.question_text|length > 60 %}…{% endif %}</summary>
+            <div class="body">{{ q.question_text }}</div></details></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">No approved questions match the current filters.</p>
+    {% endif %}
+  </section>
+  {% endif %}
+
   <script>
     async function act(qid, action, btn) {
       const approver = document.getElementById('approver').value.trim();

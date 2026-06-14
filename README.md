@@ -399,7 +399,56 @@ uv run evidence-monitor run                 # a live run over APPROVED questions
 A live `run` (or `subset`) runs a **startup credential preflight** first: if any required key is
 missing it exits non-zero with a clear, non-secret error and submits nothing (FR-032). The same
 presence gate backs `GET /health`. Resolved keys are registered for redaction, and all logs pass
-through the secret-redacting formatter, so a credential can never reach a log sink.
+through the secret-redacting formatter, so a credential can never reach a log sink. Keys live in
+`.env`; the run bridges them into the environment so the provider SDKs authenticate.
+
+### CLI commands
+
+`uv run evidence-monitor <command>` (add `--mock` to any run for fully-offline, no-key execution):
+
+| Command | What it does |
+|---------|--------------|
+| `import-questions --file <csv/xlsx>` | Import a curated question bank as **PENDING** (idempotent upsert by id). |
+| `run [--target <id>] [--limit <n>]` | Full run over **APPROVED** questions: capture → score → alert. Live runs preflight credentials first. `--target` restricts to one configured target; `--limit` caps how many questions are dispatched. |
+| `subset --persona/--therapeutic-area/--domain [--target <id>] [--limit <n>]` | Same as `run` over a filtered subset of approved questions. |
+| `dry-run` | Validate config + target connectivity; write nothing. |
+| `health-check` | **Real** minimal round-trip per **active** target (PASS only on a genuine 200; inactive targets are SKIPped, never probed). |
+| `approve <id> --approver <name>` | Medical Affairs approval gate (`PENDING → APPROVED`); records the approver + an audit entry. |
+| `reject <id> --approver <name> --reason <text>` | Reject a question (excluded from all runs); audited. |
+| `approve-all-test-numbered` | **TEST only** (not MA sign-off): approve every active question with a numbered `approver-N` / `test-N`, idempotently. |
+| `reset-to-pending` | Reset **all** questions to PENDING and clear approver/note — run before a real demo. |
+
+The `approve`/`reject`/`approve-all-test-numbered`/`reset-to-pending` commands all go through the
+question-repository approval seam and append to the append-only audit log — never raw SQL.
+
+### Verify one provider at a time (smoke test)
+
+When bringing up live credentials, verify each provider with a **real** call before a full run —
+not the optimistic preflight:
+
+```bash
+uv run evidence-monitor health-check                              # real round-trip per active target
+uv run evidence-monitor run --target anthropic-claude-target --limit 1   # one question, one target, end-to-end
+```
+
+With `--target`/`--limit` set, the run prints a per-response **capture + scoring confirmation**
+(`[SUCCESS] … scored v1 sentiment=… position=… citation=…`), so you know capture *and* scoring
+both worked for that target (a `[FAILED] … — <ErrorClass>` line shows the non-secret cause and
+`not scored`). **Order matters:** Claude is the scorer for *every* target, so fix
+`ANTHROPIC_API_KEY` first — once it works, the `openai-gpt4o` / `google-gemini` smoke tests both
+capture and score.
+
+### Local console (Reports + Approvals)
+
+```bash
+uv run uvicorn evidence_monitor.api:app     # serves http://127.0.0.1:8000 (local-only, no auth)
+```
+
+- **Reports tab** (`/?tab=reports`) — read-only sentiment / competitive-positioning / alerts / volume.
+- **Approvals tab** (`/?tab=approvals`) — the PENDING queue with approve/reject controls, plus a
+  read-only **“Approved questions (N)”** view of every APPROVED + active question (id, persona,
+  therapeutic area, brand focus, domain, status, approver, note, version, updated, full text),
+  filterable by persona / therapeutic area / domain and a free-text search, sorted by `question_id`.
 
 ## Roadmap
 

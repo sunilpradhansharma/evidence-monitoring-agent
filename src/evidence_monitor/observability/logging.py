@@ -36,10 +36,19 @@ _PATTERNS: list[re.Pattern[str]] = [
 # Exact secret values registered at runtime (e.g. resolved env credentials).
 _REGISTERED_SECRETS: set[str] = set()
 
+# Exact-secret registration ignores trivially short values: real API keys are long, and masking a
+# 1–2 char string would scrub unrelated text everywhere it appears. Their *shapes* are still caught
+# by the pattern rules above, so nothing key-shaped slips through.
+_MIN_REGISTERED_SECRET_LEN = 8
+
 
 def register_secret(value: str | None) -> None:
-    """Register an exact secret string to be masked wherever it appears in a log."""
-    if value:
+    """Register an exact secret string to be masked wherever it appears in a log.
+
+    Values shorter than :data:`_MIN_REGISTERED_SECRET_LEN` are ignored to avoid over-redaction
+    (real credentials are far longer; placeholder/test stubs are not worth masking by value).
+    """
+    if value and len(value) >= _MIN_REGISTERED_SECRET_LEN:
         _REGISTERED_SECRETS.add(value)
 
 

@@ -137,6 +137,7 @@ class Question(BaseModel):
     active: bool = True
     approval_status: ApprovalStatus = ApprovalStatus.PENDING
     approver_name: str | None = None
+    approval_note: str | None = None  # optional rationale recorded with an approval decision
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
 

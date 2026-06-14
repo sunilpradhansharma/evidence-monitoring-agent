@@ -107,8 +107,9 @@ class QuestionRepository(Protocol):
         self,
         question_id: str,
         status: ApprovalStatus,
-        approver: str,
+        approver: str | None = None,
         reason: str | None = None,
+        note: str | None = None,
     ) -> Question: ...
 
     def list(

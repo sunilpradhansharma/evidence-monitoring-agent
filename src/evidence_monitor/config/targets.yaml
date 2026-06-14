@@ -27,7 +27,7 @@ targets:
 
   - target_id: google-gemini
     llm_name: google-gemini
-    model_version: gemini-1.5-pro-002
+    model_version: gemini-2.5-flash
     endpoint: null
     temperature: 0.0
     max_tokens: 1024
@@ -42,7 +42,7 @@ targets:
 
   - target_id: anthropic-claude-target
     llm_name: anthropic-claude-target
-    model_version: claude-3-5-sonnet-20241022
+    model_version: claude-sonnet-4-6
     endpoint: null
     temperature: 0.0
     max_tokens: 1024

@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS questions (
     active          INTEGER NOT NULL,
     approval_status TEXT NOT NULL,
     approver_name   TEXT,
+    approval_note   TEXT,
     deactivated_reason TEXT,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
@@ -72,6 +73,8 @@ CREATE TABLE IF NOT EXISTS responses (
     finish_reason      TEXT NOT NULL,
     status             TEXT NOT NULL,
     block_reason       TEXT,
+    error_class        TEXT,
+    error_message      TEXT,
     alert_triggered    INTEGER NOT NULL,
     created_at         TEXT NOT NULL
 );
@@ -128,6 +131,31 @@ CREATE TABLE IF NOT EXISTS audit_log (
 """
 
 
+def _migrate_questions(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after a DB was first created (idempotent; no data loss).
+
+    ``CREATE TABLE IF NOT EXISTS`` never alters an existing table, so a DB created before a column
+    was added needs an explicit ``ALTER``. New columns are nullable with no default, so existing
+    rows simply read NULL.
+    """
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(questions)")}
+    if "approval_note" not in existing:
+        conn.execute("ALTER TABLE questions ADD COLUMN approval_note TEXT")
+
+
+def _migrate_responses(conn: sqlite3.Connection) -> None:
+    """Add the FAILED-cause columns to a DB created before they existed (idempotent; no data loss).
+
+    Existing FAILED rows captured before this change simply read NULL for these columns; new
+    failures record their non-secret class + redacted message.
+    """
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(responses)")}
+    if "error_class" not in existing:
+        conn.execute("ALTER TABLE responses ADD COLUMN error_class TEXT")
+    if "error_message" not in existing:
+        conn.execute("ALTER TABLE responses ADD COLUMN error_message TEXT")
+
+
 def _utcnow_iso() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -158,9 +186,9 @@ class _QuestionRepo:
             """
             INSERT INTO questions
                 (question_id, version, question_text, persona, therapeutic_area, brand_focus,
-                 domain, active, approval_status, approver_name, deactivated_reason,
+                 domain, active, approval_status, approver_name, approval_note, deactivated_reason,
                  created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 q.question_id,
@@ -173,6 +201,7 @@ class _QuestionRepo:
                 int(q.active),
                 str(q.approval_status),
                 q.approver_name,
+                q.approval_note,
                 deactivated_reason,
                 q.created_at.isoformat(),
                 q.updated_at.isoformat(),
@@ -184,10 +213,16 @@ class _QuestionRepo:
         self,
         question_id: str,
         status: ApprovalStatus,
-        approver: str,
+        approver: str | None = None,
         reason: str | None = None,
+        note: str | None = None,
     ) -> Question:
-        """Record an approval transition as a new version (no overwrite of history)."""
+        """Record an approval-status change as a new version (history retained, never overwritten).
+
+        ``approver`` / ``note`` set the approver name and approval rationale on the new version;
+        passing ``None`` clears them (used to reset a question back to PENDING). ``reason`` is the
+        deactivation reason column and is independent of the approval note.
+        """
         current = self._latest(question_id)
         if current is None:
             raise KeyError(f"unknown question_id: {question_id}")
@@ -197,6 +232,7 @@ class _QuestionRepo:
                 "version": version,
                 "approval_status": status,
                 "approver_name": approver,
+                "approval_note": note,
                 "updated_at": datetime.now(UTC),
             }
         )
@@ -278,8 +314,8 @@ class _ResponseRepo:
                 (response_id, run_id, question_id, target_id, timestamp_utc, llm_name,
                  llm_model_version, persona, therapeutic_area, brand_focus, domain,
                  response_text, response_tokens, finish_reason, status, block_reason,
-                 alert_triggered, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 error_class, error_message, alert_triggered, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 r.response_id,
@@ -298,6 +334,8 @@ class _ResponseRepo:
                 str(r.finish_reason),
                 str(r.status),
                 r.block_reason,
+                r.error_class,
+                r.error_message,
                 int(r.alert_triggered),
                 r.created_at.isoformat(),
             ),
@@ -490,6 +528,7 @@ def _row_to_question(r: sqlite3.Row) -> Question:
         active=bool(r["active"]),
         approval_status=ApprovalStatus(r["approval_status"]),
         approver_name=r["approver_name"],
+        approval_note=r["approval_note"],
         created_at=r["created_at"],
         updated_at=r["updated_at"],
     )
@@ -558,6 +597,8 @@ class SqliteStore:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(_SCHEMA)
+        _migrate_questions(self._conn)  # add columns missing from a pre-existing DB (idempotent)
+        _migrate_responses(self._conn)
         self._conn.commit()
 
         self.questions = _QuestionRepo(self._conn)

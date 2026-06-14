@@ -68,6 +68,7 @@ class OrchestratorContext:
     prices: dict[str, TokenPrice] = field(default_factory=dict)
     max_tokens_per_run: int = 0  # 0 = unlimited; otherwise pause the run when reached
     question_filter: QuestionFilter | None = None  # CLI subset selector
+    limit: int | None = None  # cap the number of questions dispatched (CLI --limit; smoke tests)
     logger: Logger | None = None
 
     def __post_init__(self) -> None:
@@ -108,6 +109,10 @@ def build_nodes(ctx: OrchestratorContext) -> dict[str, Callable]:
         questions = ctx.store.questions.approved_active()
         if ctx.question_filter is not None:
             questions = [q for q in questions if ctx.question_filter.matches(q)]
+        if ctx.limit is not None:
+            # Stable cap (approved_active() is ordered by question_id) — a 1-question smoke test
+            # always picks the same first question, so repeated targeted tests are deterministic.
+            questions = questions[: ctx.limit]
         cursor = (
             ctx.run_manager.resume_point(state.run_id, questions)
             if ctx.resume_run_id is not None
@@ -159,15 +164,22 @@ def build_nodes(ctx: OrchestratorContext) -> dict[str, Callable]:
                 finish_reason=result.finish_reason,
                 status=result.status,
                 block_reason=result.block_reason,
+                error_class=result.error_class,
+                error_message=result.error_message,
             )
             ctx.responses.record(response)  # immutable, write-once (Principle II)
+            # The audit detail carries the failure class on a FAILED capture so the trail itself
+            # shows *why* (was previously just the status); the redacted message lives on the row.
+            audit_detail = str(result.status)
+            if result.error_class:
+                audit_detail = f"{result.status}: {result.error_class}"
             ctx.store.audit.append(
                 AuditEvent(
                     run_id=state.run_id,
                     event_type=AuditEventType.RESPONSE_RECEIVED,
                     role="TARGET",
                     target=label,
-                    detail=str(result.status),
+                    detail=audit_detail,
                 )
             )
             ctx.cost.record(target.llm_name, output_tokens=result.response_tokens)
@@ -245,6 +257,15 @@ def build_nodes(ctx: OrchestratorContext) -> dict[str, Callable]:
         by_status = Counter(str(r.status) for r in state.responses)
         captured = by_status.get(str(ResponseStatus.SUCCESS), 0)
         failures = by_status.get(str(ResponseStatus.FAILED), 0)
+        # Group FAILED captures by their (non-secret) error_class so the summary shows *why* a run
+        # failed, not just how many (FR-031 diagnosability). Pre-fix rows have no class → UNKNOWN.
+        failures_by_error_class = dict(
+            Counter(
+                r.error_class or "UNKNOWN"
+                for r in state.responses
+                if r.status is ResponseStatus.FAILED
+            )
+        )
         run = ctx.store.runs.get(state.run_id)
         summary = RunSummary(
             run_id=state.run_id,
@@ -255,6 +276,7 @@ def build_nodes(ctx: OrchestratorContext) -> dict[str, Callable]:
             responses_by_status=dict(by_status),
             responses_captured=captured,
             failure_count=failures,
+            failures_by_error_class=failures_by_error_class,
             alert_count=len(state.alerts),
             total_tokens=state.total_tokens,
             est_cost=round(ctx.cost.est_cost, 6),
