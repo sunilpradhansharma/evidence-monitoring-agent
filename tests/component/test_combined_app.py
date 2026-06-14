@@ -46,13 +46,13 @@ def _first_pending_id(client: TestClient) -> str:
 # Tabs render
 # --------------------------------------------------------------------------- #
 def test_index_renders_both_tabs(client):
-    home = client.get("/")
+    home = client.get("/html")
     assert home.status_code == 200
     assert "Reports" in home.text and "Approvals" in home.text
 
 
 def test_approvals_tab_lists_pending_questions(client):
-    page = client.get("/", params={"tab": "approvals"})
+    page = client.get("/html", params={"tab": "approvals"})
     assert page.status_code == 200
     # The pending queue is server-rendered with a reviewer-name field (recorded on every action).
     assert "Pending questions" in page.text
@@ -116,7 +116,7 @@ def test_score_review_disabled_returns_404(client):
 
 def test_score_review_tab_removed_from_ui(client):
     # Two tabs only — the Score-review tab is gone entirely (out of scope).
-    page = client.get("/", params={"tab": "reports"}).text
+    page = client.get("/html", params={"tab": "reports"}).text
     assert "Score review" not in page
     assert ">Reports</a>" in page and ">Approvals</a>" in page
 

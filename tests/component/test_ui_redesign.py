@@ -167,7 +167,7 @@ def client(store):
 # Reports tab
 # --------------------------------------------------------------------------- #
 def test_reports_tab_renders_redesigned_presentation(client):
-    html = client.get("/", params={"tab": "reports", "run_id": client.store._run_id}).text
+    html = client.get("/html", params={"tab": "reports", "run_id": client.store._run_id}).text
 
     # Masthead + lede (no "Local Console" / "Local POC" tags).
     assert "Evidence Monitoring AI Agent" in html
@@ -196,7 +196,7 @@ def test_reports_tab_renders_redesigned_presentation(client):
 
 
 def test_reports_summary_is_scoped_to_selected_run(client):
-    html = client.get("/", params={"tab": "reports", "run_id": client.store._run_id}).text
+    html = client.get("/html", params={"tab": "reports", "run_id": client.store._run_id}).text
     # The run had 4 responses: 2 SUCCESS, 1 TRUNCATED, 1 FAILED → capture rate 75% (< 95% target).
     assert "4 response(s) in view" in html
     assert "75%" in html
@@ -207,7 +207,7 @@ def test_reports_summary_is_scoped_to_selected_run(client):
 # Approvals tab
 # --------------------------------------------------------------------------- #
 def test_approvals_tab_renders_redesigned_presentation(client):
-    html = client.get("/", params={"tab": "approvals"}).text
+    html = client.get("/html", params={"tab": "approvals"}).text
 
     # Compliance banner.
     assert 'data-section="compliance"' in html
@@ -268,7 +268,7 @@ def test_lists_show_each_question_once_despite_version_history(client):
     store.questions.upsert(q("R-DUP", "r2", persona=Persona.PROSPECT))
     store.questions.set_approval("R-DUP", ApprovalStatus.REJECTED, "rev", reason="off-label")
 
-    html = client.get("/", params={"tab": "approvals", "status": "ALL"}).text
+    html = client.get("/html", params={"tab": "approvals", "status": "ALL"}).text
     assert html.count('data-question-id="P-DUP"') == 1  # pending: once despite 3 versions
     assert html.count("<td>A-DUP</td>") == 1  # approved table: once despite 3 versions
     assert html.count("<td>R-DUP</td>") == 1  # rejected table: once despite 3 versions
@@ -288,7 +288,7 @@ def test_approval_gate_counts_are_version_aware(client):
         )
     )  # bump A-1 to v3 (still APPROVED-eligible after re-approval)
     store.questions.set_approval("A-1", ApprovalStatus.APPROVED, "rev-a2")
-    html = client.get("/", params={"tab": "approvals"}).text
+    html = client.get("/html", params={"tab": "approvals"}).text
     # A-1 has 3 versions but counts exactly once as Approved; P-1 pending, R-1 rejected.
     assert "<b>1</b> Approved" in html
     assert "<b>1</b> Pending" in html

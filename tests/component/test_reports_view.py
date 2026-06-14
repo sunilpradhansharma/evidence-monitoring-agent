@@ -150,7 +150,7 @@ def test_static_export_is_self_contained(store):
 
 
 def test_served_reports_tab_uses_same_render(client):
-    resp = client.get("/")
+    resp = client.get("/html")
     assert resp.status_code == 200
     body = resp.text
     assert "Reports" in body and "Approvals" in body  # tabs
@@ -173,7 +173,7 @@ def test_reports_endpoints_never_write(client):
     before = _row_counts(client.store)
     run_id = client.store._run_id
 
-    assert client.get("/").status_code == 200
+    assert client.get("/html").status_code == 200
     assert client.get("/reports/responses").status_code == 200
     assert client.get("/reports/responses/R2").status_code == 200
     assert client.get("/reports/alerts").status_code == 200

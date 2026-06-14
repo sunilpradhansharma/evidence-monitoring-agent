@@ -57,7 +57,7 @@ def test_reports_tab_renders_run_dropdown(seeded):
     store, dirty_id, clean_id = seeded
     app = create_app(store=store, settings=Settings(_env_file=None))
     with TestClient(app) as c:
-        html = c.get("/", params={"tab": "reports"}).text
+        html = c.get("/html", params={"tab": "reports"}).text
     assert "All runs" in html
     assert dirty_id[:8] in html and clean_id[:8] in html
 
@@ -66,5 +66,5 @@ def test_reports_tab_scopes_view_by_run_id(seeded):
     store, _, clean_id = seeded
     app = create_app(store=store, settings=Settings(_env_file=None))
     with TestClient(app) as c:
-        html = c.get("/", params={"tab": "reports", "run_id": clean_id}).text
+        html = c.get("/html", params={"tab": "reports", "run_id": clean_id}).text
     assert "1 response(s) in view" in html  # narrowed to the clean run only

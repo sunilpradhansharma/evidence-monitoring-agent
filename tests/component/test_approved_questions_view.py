@@ -126,7 +126,7 @@ def test_options_list_only_approved_therapeutic_areas(seeded):
 def test_approvals_tab_renders_approved_section(seeded):
     app = create_app(store=seeded, settings=Settings(_env_file=None))
     with TestClient(app) as c:
-        html = c.get("/", params={"tab": "approvals"}).text
+        html = c.get("/html", params={"tab": "approvals"}).text
 
     assert "Approved questions (3)" in html
     assert "A-001" in html and "rev-a" in html and "ok-a" in html
@@ -139,6 +139,6 @@ def test_approvals_tab_renders_approved_section(seeded):
 def test_approvals_tab_search_narrows_rendered_rows(seeded):
     app = create_app(store=seeded, settings=Settings(_env_file=None))
     with TestClient(app) as c:
-        html = c.get("/", params={"tab": "approvals", "search": "beta"}).text
+        html = c.get("/html", params={"tab": "approvals", "search": "beta"}).text
     assert "Approved questions (1)" in html
     assert "A-002" in html and "A-001" not in html.split("Approved questions (1)", 1)[1]

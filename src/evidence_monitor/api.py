@@ -22,15 +22,30 @@ module has no filesystem side effect.
 
 from __future__ import annotations
 
+import os
 from dataclasses import replace
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    Response,
+)
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from evidence_monitor.config.settings import Settings, credential_preflight, get_settings
+from evidence_monitor.dashboard.json_api import (
+    questions_payload,
+    report_payload,
+    response_payload,
+    runs_payload,
+)
 from evidence_monitor.dashboard.render import (
     build_approved_questions,
     build_report,
@@ -186,67 +201,75 @@ def create_app(store: DataAccess | None = None, settings: Settings | None = None
     _register_health(app)
     _register_approvals(app)
     _register_score_review(app)
+    _register_api(app)
+    _register_spa(app)  # MUST be last: mounts assets + the SPA catch-all fallback.
     return app
 
 
 # --------------------------------------------------------------------------- #
-# UI — the single tabbed page (Reports + Approvals + scaffolded Score-review)
+# Legacy server-rendered UI — kept reachable at /html during the React transition.
+# The React SPA is now the PRIMARY UI at "/" (see _register_spa); this Jinja UI is unchanged
+# and shares the same read-only render path + the same approve/reject write endpoints.
 # --------------------------------------------------------------------------- #
+def _build_index_html(request: Request, store: DataAccess, settings: Settings) -> str:
+    """Render the legacy tabbed HTML app (Reports + Approvals). Read-only render path."""
+    active_tab = request.query_params.get("tab", "reports")
+    params = request.query_params
+
+    # Reports default to the LATEST run when none is chosen (US5); an explicit run_id (or "All
+    # runs" → no run_id, never reaches here because the empty value is falsy) overrides it.
+    filters = _filters_from_params(params)
+    if filters.run_id is None and "run_id" not in params:
+        runs = store.runs.list()
+        if runs:
+            filters = replace(filters, run_id=runs[0].run_id)
+    report = build_report(store, filters)
+
+    # Approvals tab inputs. All reads are version-aware (latest version per question); the ONLY
+    # writes remain the approve/reject endpoints. Status + persona filter the queue/lists.
+    status_filter = (params.get("status") or "PENDING").upper()
+    if status_filter not in {"PENDING", "APPROVED", "REJECTED", "ALL"}:
+        status_filter = "PENDING"
+    persona_filter = params.get("persona") or ""
+    persona_enum = _enum_or_none(Persona, persona_filter)
+    svc = QuestionService(store.questions)
+    # latest_per_question guarantees one row per question at its current version (no version
+    # leak); pending is persona-then-id sorted so the template can group it by persona.
+    pending = latest_per_question(
+        svc.list_questions(
+            approval_status=ApprovalStatus.PENDING, active=True, persona=persona_enum
+        )
+    )
+    pending.sort(key=lambda q: (str(q.persona), q.question_id))
+    rejected = latest_per_question(
+        svc.list_questions(approval_status=ApprovalStatus.REJECTED, persona=persona_enum)
+    )
+    rejected.sort(key=lambda q: q.question_id)
+    # Read-only approved-questions view (Approvals tab) — through the question-repo read path.
+    approved_view = build_approved_questions(
+        store,
+        persona=params.get("persona") or None,
+        therapeutic_area=params.get("therapeutic_area") or None,
+        domain=params.get("domain") or None,
+        search=params.get("search") or None,
+    )
+    return render_app(
+        report,
+        pending_questions=pending,
+        approved_view=approved_view,
+        rejected_questions=rejected,
+        status_filter=status_filter,
+        persona_filter=persona_filter,
+        active_tab=active_tab,
+        score_review_enabled=settings.enable_score_review,
+    )
+
+
 def _register_ui(app: FastAPI) -> None:
-    @app.get("/", response_class=HTMLResponse)
-    def index(request: Request, store: StoreDep, settings: SettingsDep) -> HTMLResponse:
-        """Serve the tabbed app. The Reports tab uses the same render path as the export."""
-        active_tab = request.query_params.get("tab", "reports")
-        params = request.query_params
-
-        # Reports default to the LATEST run when none is chosen (US5); an explicit run_id (or "All
-        # runs" → no run_id, never reaches here because the empty value is falsy) overrides it.
-        filters = _filters_from_params(params)
-        if filters.run_id is None and "run_id" not in params:
-            runs = store.runs.list()
-            if runs:
-                filters = replace(filters, run_id=runs[0].run_id)
-        report = build_report(store, filters)
-
-        # Approvals tab inputs. All reads are version-aware (latest version per question); the ONLY
-        # writes remain the approve/reject endpoints. Status + persona filter the queue/lists.
-        status_filter = (params.get("status") or "PENDING").upper()
-        if status_filter not in {"PENDING", "APPROVED", "REJECTED", "ALL"}:
-            status_filter = "PENDING"
-        persona_filter = params.get("persona") or ""
-        persona_enum = _enum_or_none(Persona, persona_filter)
-        svc = QuestionService(store.questions)
-        # latest_per_question guarantees one row per question at its current version (no version
-        # leak); pending is persona-then-id sorted so the template can group it by persona.
-        pending = latest_per_question(
-            svc.list_questions(
-                approval_status=ApprovalStatus.PENDING, active=True, persona=persona_enum
-            )
-        )
-        pending.sort(key=lambda q: (str(q.persona), q.question_id))
-        rejected = latest_per_question(
-            svc.list_questions(approval_status=ApprovalStatus.REJECTED, persona=persona_enum)
-        )
-        rejected.sort(key=lambda q: q.question_id)
-        # Read-only approved-questions view (Approvals tab) — through the question-repo read path.
-        approved_view = build_approved_questions(
-            store,
-            persona=params.get("persona") or None,
-            therapeutic_area=params.get("therapeutic_area") or None,
-            domain=params.get("domain") or None,
-            search=params.get("search") or None,
-        )
-        html = render_app(
-            report,
-            pending_questions=pending,
-            approved_view=approved_view,
-            rejected_questions=rejected,
-            status_filter=status_filter,
-            persona_filter=persona_filter,
-            active_tab=active_tab,
-            score_review_enabled=settings.enable_score_review,
-        )
-        return HTMLResponse(html)
+    @app.get("/html", response_class=HTMLResponse)
+    def index_html(request: Request, store: StoreDep, settings: SettingsDep) -> HTMLResponse:
+        """Legacy server-rendered UI (kept working during the React transition)."""
+        return HTMLResponse(_build_index_html(request, store, settings))
 
 
 # --------------------------------------------------------------------------- #
@@ -438,6 +461,85 @@ def _register_score_review(app: FastAPI) -> None:
         if not settings.enable_score_review:
             raise HTTPException(status_code=404, detail="score review is disabled in this build")
         raise HTTPException(status_code=501, detail="score override not yet implemented")
+
+
+# --------------------------------------------------------------------------- #
+# Read-only JSON API (Part A) — powers the React dashboard. Reuses render.py via json_api;
+# NO new aggregation and NO new write path (writes stay on /approvals/*).
+# --------------------------------------------------------------------------- #
+def _register_api(app: FastAPI) -> None:
+    @app.get("/api/runs")
+    def api_runs(store: StoreDep):
+        """Runs for the run selector (most-recent first)."""
+        return runs_payload(store)
+
+    @app.get("/api/runs/{run_id}/report")
+    def api_run_report(run_id: str, store: StoreDep):
+        """Full Reports payload for one run (same aggregation as the HTML Reports view)."""
+        try:
+            return report_payload(store, run_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"unknown run_id: {run_id}") from exc
+
+    @app.get("/api/questions")
+    def api_questions(store: StoreDep, status: str | None = None, persona: str | None = None):
+        """Version-aware questions for the Approvals tab + global status counts (read-only)."""
+        return questions_payload(store, status=status, persona=persona)
+
+    @app.get("/api/responses/{response_id}")
+    def api_response(response_id: str, store: StoreDep):
+        """Full response text + scoring rationale for coverage-cell / alert click-through."""
+        try:
+            return response_payload(store, response_id)
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=404, detail=f"unknown response_id: {response_id}"
+            ) from exc
+
+
+# --------------------------------------------------------------------------- #
+# React SPA serving — built Vite assets at "/", with a client-side-routing fallback.
+# Registered LAST so every explicit API/HTML route wins; only unknown GET paths fall through to
+# index.html. When the build is absent (tests / fresh checkout) "/" serves the legacy HTML so the
+# app still works without a frontend build.
+# --------------------------------------------------------------------------- #
+def _frontend_dist() -> Path:
+    """Resolve the built-frontend directory (override with ``EM_FRONTEND_DIST``)."""
+    override = os.environ.get("EM_FRONTEND_DIST")
+    if override:
+        return Path(override)
+    # api.py → src/evidence_monitor/ → src/ → repo root → frontend/dist
+    return Path(__file__).resolve().parents[2] / "frontend" / "dist"
+
+
+def _register_spa(app: FastAPI) -> None:
+    dist = _frontend_dist()
+    index_file = dist / "index.html"
+    assets_dir = dist / "assets"
+
+    if index_file.exists():
+        if assets_dir.is_dir():
+            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+        @app.get("/", include_in_schema=False)
+        def spa_root() -> FileResponse:
+            return FileResponse(str(index_file))
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        def spa_fallback(full_path: str) -> Response:
+            """Serve index.html for client-side routes; never shadow API/HTML/health paths."""
+            reserved = ("api/", "reports/", "approvals/", "assets/", "score-review/")
+            if full_path == "html" or full_path.startswith(reserved) or full_path == "health":
+                raise HTTPException(status_code=404, detail="not found")
+            candidate = dist / full_path
+            if candidate.is_file():  # static root files (favicon, etc.)
+                return FileResponse(str(candidate))
+            return FileResponse(str(index_file))
+    else:
+        # No build present → "/" serves the legacy HTML so the app works without a frontend build.
+        @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+        def root_html(request: Request, store: StoreDep, settings: SettingsDep) -> HTMLResponse:
+            return HTMLResponse(_build_index_html(request, store, settings))
 
 
 # --------------------------------------------------------------------------- #
