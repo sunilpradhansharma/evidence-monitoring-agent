@@ -17,7 +17,13 @@ from pydantic import ValidationError
 from tests.fixtures import sample_response, sample_scoring
 
 from evidence_monitor.data_access.interface import QueryFilters
-from evidence_monitor.data_access.models import Domain, Persona, ResponseStatus
+from evidence_monitor.data_access.models import (
+    Alert,
+    AlertRule,
+    Domain,
+    Persona,
+    ResponseStatus,
+)
 from evidence_monitor.data_access.sqlite_store import SqliteStore
 from evidence_monitor.response_repo.repository import ResponseService
 from evidence_monitor.response_repo.schema import FinishReason, Response
@@ -121,7 +127,13 @@ def test_query_filters_each_dimension(svc, store):
     svc.record(_resp("brandY", brand_focus="Brand-Y"))
     svc.record(_resp("safety", domain=Domain.SAFETY))
     svc.record(_resp("failed", status=ResponseStatus.FAILED))
-    svc.record(_resp("alerted", alert_triggered=True))
+    svc.record(_resp("alerted"))
+    # Alert state is derived from an Alert record (responses are immutable), not a stored flag.
+    store.alerts.insert(
+        Alert.for_rule(
+            score_id="s1", response_id="alerted", rule=AlertRule.NEGATIVE_SENTIMENT, reason="neg"
+        )
+    )
 
     assert _ids(svc.query(QueryFilters(llm="provider-b"))) == {"llm-b"}
     assert _ids(svc.query(QueryFilters(persona=Persona.PROVIDER))) == {"prov"}
@@ -132,6 +144,24 @@ def test_query_filters_each_dimension(svc, store):
     assert _ids(svc.query(QueryFilters(alert_status=True))) == {"alerted"}
     # No filter → everything.
     assert svc.query(QueryFilters()).total == 8
+
+
+def test_alert_triggered_is_derived_from_alert_records(svc, store):
+    # Responses are immutable, so alert_triggered is derived from the alerts table on read.
+    svc.record(_resp("r"))
+    assert svc.get("r").alert_triggered is False
+    assert _ids(svc.query(QueryFilters(alert_status=False))) == {"r"}
+    assert _ids(svc.query(QueryFilters(alert_status=True))) == set()
+
+    store.alerts.insert(
+        Alert.for_rule(
+            score_id="s", response_id="r", rule=AlertRule.WRONG_INDICATION, reason="wrong"
+        )
+    )
+    # Same stored (immutable) row now reads as alert-triggered, via get() and query().
+    assert svc.get("r").alert_triggered is True
+    assert _ids(svc.query(QueryFilters(alert_status=True))) == {"r"}
+    assert _ids(svc.query(QueryFilters(alert_status=False))) == set()
 
 
 def test_query_filters_by_run_id(svc):

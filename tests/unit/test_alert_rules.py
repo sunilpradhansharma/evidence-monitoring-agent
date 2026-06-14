@@ -45,15 +45,23 @@ def test_negative_sentiment_fires_below_threshold_only():
     assert _fired(_record(sentiment_score=-0.3), thresholds=thresholds) == set()
 
 
-def test_not_recommended_position_fires():
+def test_not_recommended_position_fires_only_when_not_recommended():
     assert _fired(_record(competitive_position=CompetitivePosition.NOT_RECOMMENDED)) == {
         AlertRule.NOT_RECOMMENDED
     }
+    # Any other position does not fire this rule.
+    assert AlertRule.NOT_RECOMMENDED not in _fired(
+        _record(competitive_position=CompetitivePosition.SECOND_LINE)
+    )
 
 
-def test_wrong_indication_fires_at_highest_severity():
+def test_wrong_indication_fires_at_highest_severity_only_when_wrong():
     fired = evaluate(_record(citation_status=CitationStatus.WRONG_INDICATION))
     assert [f.rule for f in fired] == [AlertRule.WRONG_INDICATION]
+    # A correct (or any non-WRONG) citation status does not fire it.
+    assert AlertRule.WRONG_INDICATION not in _fired(
+        _record(citation_status=CitationStatus.PARTIAL)
+    )
 
 
 def test_competitor_higher_fires_only_with_sufficient_margin():

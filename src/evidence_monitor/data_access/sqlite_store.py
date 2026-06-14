@@ -306,8 +306,14 @@ class _ResponseRepo:
         return r
 
     def get(self, response_id: str) -> Response | None:
+        # Derive the alert flag from the alerts table so a single get matches query() (responses
+        # are immutable; alert state is never written back onto the row).
         row = self._conn.execute(
-            "SELECT * FROM responses WHERE response_id = ?", (response_id,)
+            "SELECT responses.*, "
+            "EXISTS (SELECT 1 FROM alerts a WHERE a.response_id = responses.response_id) "
+            "AS has_alert "
+            "FROM responses WHERE responses.response_id = ?",
+            (response_id,),
         ).fetchone()
         return row_to_response(row) if row else None
 

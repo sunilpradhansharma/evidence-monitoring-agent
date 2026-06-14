@@ -33,6 +33,19 @@ LEFT JOIN (
 """
 
 
+# Alert state is DERIVED, not stored on the (immutable) response: a response is alert-triggered
+# iff an Alert record references it. Read paths expose this as a ``has_alert`` column.
+_HAS_ALERT_EXPR = "EXISTS (SELECT 1 FROM alerts a WHERE a.response_id = responses.response_id)"
+
+
+def _alert_triggered(r: sqlite3.Row) -> bool:
+    """Derived alert flag from the ``has_alert`` column when present (else the stored default)."""
+    columns = r.keys()  # sqlite3.Row membership is over values, so test the key list explicitly
+    if "has_alert" in columns:
+        return bool(r["has_alert"])
+    return bool(r["alert_triggered"])
+
+
 def row_to_response(r: sqlite3.Row) -> Response:
     """Build the immutable :class:`Response` from one ``responses`` row."""
     return Response(
@@ -52,7 +65,7 @@ def row_to_response(r: sqlite3.Row) -> Response:
         finish_reason=FinishReason(r["finish_reason"]),
         status=ResponseStatus(r["status"]),
         block_reason=r["block_reason"],
-        alert_triggered=bool(r["alert_triggered"]),
+        alert_triggered=_alert_triggered(r),
         created_at=r["created_at"],
     )
 
@@ -85,7 +98,8 @@ def _where(filters: QueryFilters) -> tuple[str, list[object]]:
     if filters.date_to is not None:
         add("responses.timestamp_utc <= ?", filters.date_to.isoformat())
     if filters.alert_status is not None:
-        add("responses.alert_triggered = ?", int(filters.alert_status))
+        # Derived from the alerts table (responses are immutable) — no bound param needed.
+        clauses.append(_HAS_ALERT_EXPR if filters.alert_status else f"NOT {_HAS_ALERT_EXPR}")
     if filters.sentiment_min is not None:
         add("ls.sentiment_score >= ?", filters.sentiment_min)
     if filters.sentiment_max is not None:
@@ -112,7 +126,7 @@ def query_responses(
     total = conn.execute(f"SELECT COUNT(*) {base}", params).fetchone()[0]
 
     sql = (
-        f"SELECT responses.* {base} "
+        f"SELECT responses.*, {_HAS_ALERT_EXPR} AS has_alert {base} "
         "ORDER BY responses.timestamp_utc DESC, responses.response_id ASC"
     )
     page_params = list(params)
