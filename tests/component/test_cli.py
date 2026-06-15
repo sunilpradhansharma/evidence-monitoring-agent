@@ -49,8 +49,10 @@ def test_run_produces_full_summary(store):
 
     assert isinstance(summary, RunSummary)
     assert summary.questions_attempted == 3
-    assert summary.responses_by_status == {"SUCCESS": 9}  # 3 questions × 3 active targets
-    assert summary.responses_captured == 9
+    # 10 = PROSPECT + PATIENT × 3 unconditional targets, plus PROVIDER × 4 (the 3 unconditional
+    # targets and the active PROVIDER-only provider-evidence-dev stand-in).
+    assert summary.responses_by_status == {"SUCCESS": 10}
+    assert summary.responses_captured == 10
     assert summary.alert_count == 0
     assert summary.total_tokens > 0
     assert summary.est_cost > 0  # priced from config (targets.yaml prices)
@@ -67,7 +69,9 @@ def test_subset_filter_by_persona(store):
     assert summary.questions_attempted == 1  # only the PROVIDER question
     personas = {r.persona for r in _responses(store)}
     assert personas == {Persona.PROVIDER}
-    assert summary.responses_captured == 3
+    # The PROVIDER question reaches 4 active targets: the 3 unconditional providers plus the active
+    # PROVIDER-only provider-evidence-dev stand-in.
+    assert summary.responses_captured == 4
 
 
 def test_subset_filter_by_domain(store):

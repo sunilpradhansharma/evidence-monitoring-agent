@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getQuestions, type QuestionItem, type QuestionsPayload } from "../../api";
+import { useReviewer } from "../../state/reviewer";
 import Section from "../Section";
 import ComplianceBanner from "./ComplianceBanner";
 import Filters from "./Filters";
@@ -11,7 +12,7 @@ import StatusCounts from "./StatusCounts";
 type Counts = QuestionsPayload["counts"];
 
 export default function ApprovalsView() {
-  const [reviewer, setReviewer] = useState("");
+  const { reviewer, setReviewer } = useReviewer();
   const [status, setStatus] = useState("ALL");
   const [persona, setPersona] = useState("");
   const [counts, setCounts] = useState<Counts>({ pending: 0, approved: 0, rejected: 0, total: 0 });

@@ -133,6 +133,16 @@ export interface ResponseDetail {
   } | null;
 }
 
+export interface AlertRecord {
+  alert_id: string;
+  score_id: string;
+  response_id: string;
+  rule_fired: string;
+  severity: number;
+  reason: string;
+  created_at: string | null;
+}
+
 async function getJSON<T>(url: string): Promise<T> {
   const resp = await fetch(url, { headers: { Accept: "application/json" } });
   if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
@@ -144,6 +154,8 @@ export const getReport = (runId: string) =>
   getJSON<Report>(`/api/runs/${encodeURIComponent(runId)}/report`);
 export const getResponse = (responseId: string) =>
   getJSON<ResponseDetail>(`/api/responses/${encodeURIComponent(responseId)}`);
+// Alerts ordered by severity (WRONG_INDICATION first); reuses the existing read-only endpoint.
+export const getAlerts = () => getJSON<AlertRecord[]>("/reports/alerts");
 
 export function getQuestions(status: string, persona?: string): Promise<QuestionsPayload> {
   const params = new URLSearchParams({ status });

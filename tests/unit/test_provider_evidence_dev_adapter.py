@@ -3,8 +3,9 @@ Evidence Provider target (PubMed E-utilities + Claude synthesis).
 
 Everything is exercised with the E-utilities HTTP calls and the Claude client MOCKED — NO live
 network. The tests assert the two-step flow, that PMIDs are recorded in the (immutable) response
-provenance, that the target is inactive by default, that the display name is "Provider evidence
-(dev)", and that the target's name is NEVER the literal string "Open Evidence".
+provenance, that the target is an active PROVIDER-only target (operator-enabled in config) while a
+deliberately-inactive fixture is gated out, that the display name is "Provider evidence (dev)", and
+that the target's name is NEVER the literal string "Open Evidence".
 """
 
 from __future__ import annotations
@@ -13,14 +14,14 @@ import json
 from pathlib import Path
 
 from evidence_monitor.config.settings import Settings
-from evidence_monitor.data_access.models import Persona
+from evidence_monitor.data_access.models import LLMTarget, Persona
 from evidence_monitor.llm.adapters.base import MockBehavior
 from evidence_monitor.llm.adapters.provider_evidence_dev import (
     DISPLAY_NAME,
     ProviderEvidenceDevAdapter,
 )
 from evidence_monitor.llm.client import ClaudeClient
-from evidence_monitor.llm.registry import build_adapter, load_targets
+from evidence_monitor.llm.registry import build_adapter, load_targets, targets_for_persona
 from evidence_monitor.response_repo.schema import FinishReason, ResponseStatus
 
 TARGETS_YAML = (
@@ -142,11 +143,36 @@ def test_pubmed_unreachable_fails_gracefully():
 # --------------------------------------------------------------------------- #
 # Config + labelling guarantees
 # --------------------------------------------------------------------------- #
-def test_target_is_inactive_by_default():
+def _inactive_fixture_target() -> LLMTarget:
+    """A target that is inactive ON PURPOSE — used to cover the inactive-path gating now that the
+    dev target itself is active by the operator's config choice."""
+    return LLMTarget(
+        target_id="inactive-fixture",
+        llm_name="inactive-fixture",
+        model_version="none",
+        personas=[Persona.PROVIDER],
+        active=False,
+        tos_acknowledged=False,
+    )
+
+
+def test_dev_target_is_active_provider_only():
+    # The operator has enabled provider-evidence-dev in config: it is an active, PROVIDER-only
+    # target that surfaces like any other active target.
     target = _dev_target()
-    assert target.active is False
-    assert target.tos_acknowledged is False
+    assert target.active is True
+    assert target.tos_acknowledged is True
     assert target.personas == [Persona.PROVIDER]
+
+
+def test_inactive_target_is_gated_out():
+    # Inactive-path coverage against a deliberately-inactive fixture: persona gating
+    # (active AND serves-persona) excludes it from every run, while the active dev target stays in.
+    inactive = _inactive_fixture_target()
+    assert inactive.active is False
+    assert inactive.tos_acknowledged is False
+    eligible = targets_for_persona([inactive, _dev_target()], Persona.PROVIDER)
+    assert [t.target_id for t in eligible] == ["provider-evidence-dev"]
 
 
 def test_display_name_is_provider_evidence_dev():

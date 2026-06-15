@@ -90,18 +90,22 @@ def _responses_by_question(store) -> dict[str, int]:
 def test_full_fanout_over_seed(store, targets):
     _seed_approved_questions(store)
     expected_pairs = _expected_pairs(store, targets)
-    assert len(expected_pairs) == 9  # 3 approved questions × 3 active targets
+    # 10 = PROSPECT + PATIENT questions × 3 unconditional targets, plus the PROVIDER question × 4:
+    # the 3 unconditional targets and the active PROVIDER-only provider-evidence-dev target.
+    assert len(expected_pairs) == 10
 
     final = run(_make_context(store, targets), trigger=TriggerType.ADHOC)
 
     # Every (question × eligible target) produced exactly one response.
     assert {(r.question_id, r.target_id) for r in final.responses} == expected_pairs
-    assert len(final.responses) == 9
+    assert len(final.responses) == 10
     # The inactive, conditional Open Evidence target never fires (FR-007).
     assert "open-evidence" not in {r.target_id for r in final.responses}
+    # The active PROVIDER-only dev stand-in does fire (operator-enabled in config).
+    assert "provider-evidence-dev" in {r.target_id for r in final.responses}
 
     # Every captured response was scored into a separate versioned record (US2).
-    assert len(final.scores) == 9
+    assert len(final.scores) == 10
     for response in final.responses:
         assert store.scores.latest_for(response.response_id) is not None
 
@@ -110,8 +114,8 @@ def test_full_fanout_over_seed(store, targets):
 
     # Summary + run finalization (FR-026).
     assert final.summary.questions_attempted == 3
-    assert final.summary.responses_captured == 9
-    assert final.summary.responses_by_status == {"SUCCESS": 9}
+    assert final.summary.responses_captured == 10
+    assert final.summary.responses_by_status == {"SUCCESS": 10}
     assert final.summary.alert_count == 0
     assert final.summary.total_tokens > 0
     assert store.runs.get(final.run_id).ended_at is not None
@@ -128,8 +132,10 @@ def test_full_fanout_writes_audit_trail(store, targets):
 
     assert counts[str(AuditEventType.RUN_STARTED)] == 1
     assert counts[str(AuditEventType.RUN_ENDED)] == 1
-    assert counts[str(AuditEventType.QUERY_DISPATCHED)] == 9
-    assert counts[str(AuditEventType.RESPONSE_RECEIVED)] == 9
+    # 10 dispatched/received = full persona-aware fan-out (PROVIDER question also reaches the active
+    # provider-evidence-dev target).
+    assert counts[str(AuditEventType.QUERY_DISPATCHED)] == 10
+    assert counts[str(AuditEventType.RESPONSE_RECEIVED)] == 10
 
 
 def test_run_only_dispatches_approved_questions(store, targets):
@@ -188,6 +194,11 @@ def test_resume_skips_completed_questions_without_duplicates(store, targets):
     done_qid = _simulate_first_question_completed(store, targets, interrupted.run_id)
     remaining_qids = {q.question_id for q in approved if q.question_id != done_qid}
 
+    # Persona-aware fan-out: the PROVIDER question reaches 4 active targets (incl. provider-evidence-
+    # dev) and the others 3, so per-question counts are NOT uniform. Total over the bank is 10.
+    fanout = {q.question_id: len(targets_for_persona(targets, q.persona)) for q in approved}
+    total_fanout = sum(fanout.values())
+
     # Resume the SAME run.
     final = run(_make_context(store, targets, resume_run_id=interrupted.run_id))
 
@@ -195,18 +206,18 @@ def test_resume_skips_completed_questions_without_duplicates(store, targets):
     assert final.run_id == interrupted.run_id
     # The resumed invocation dispatched ONLY the not-yet-completed questions.
     assert {r.question_id for r in final.responses} == remaining_qids
-    assert len(final.responses) == 6  # 2 remaining questions × 3 targets
+    assert len(final.responses) == sum(fanout[qid] for qid in remaining_qids)
     assert final.cursor == 3  # cursor advanced past the last question
 
-    # The completed question was NOT re-submitted: it still has exactly one response per target,
-    # and the store holds the full fan-out once (no duplicates).
+    # The completed question was NOT re-submitted: it still has exactly its persona's fan-out, and
+    # the store holds the full fan-out once (no duplicates).
     per_question = _responses_by_question(store)
-    assert per_question[done_qid] == 3
-    assert all(count == 3 for count in per_question.values())
-    assert sum(per_question.values()) == 9
+    assert per_question[done_qid] == fanout[done_qid]
+    assert per_question == fanout
+    assert sum(per_question.values()) == total_fanout
 
     # Resume scores the WHOLE run, including the responses captured before the interruption.
-    assert len(final.scores) == 9
+    assert len(final.scores) == total_fanout
     run_responses = (
         ResponseService(store.responses)
         .query(QueryFilters(run_id=interrupted.run_id), page_size=None)

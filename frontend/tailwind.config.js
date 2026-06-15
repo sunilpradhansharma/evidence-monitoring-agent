@@ -20,6 +20,16 @@ export default {
         surface: { DEFAULT: "#FFFFFF", muted: "#F7F9FB" },
         page: "#F1F4F7",
         hair: "#E3E8EE",
+        // Deep-navy sidebar shell. A darker companion to the clinical brand blue; same hue family,
+        // used only for the persistent left navigation chrome.
+        navy: {
+          DEFAULT: "#0F2840",
+          deep: "#0A1E31",
+          soft: "#163653",
+          line: "#274B6B",
+          ink: "#AFC4D8",
+          faint: "#7C97B0",
+        },
       },
       fontFamily: {
         sans: [

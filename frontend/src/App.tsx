@@ -1,19 +1,29 @@
 import { Route, Routes } from "react-router-dom";
-import Masthead from "./components/Masthead";
-import ReportsView from "./components/reports/ReportsView";
-import ApprovalsView from "./components/approvals/ApprovalsView";
+import AppLayout from "./components/layout/AppLayout";
+import DashboardPage from "./pages/DashboardPage";
+import ResponsesPage from "./pages/ResponsesPage";
+import AlertsPage from "./pages/AlertsPage";
+import ComparisonPage from "./pages/ComparisonPage";
+import QuestionsPage from "./pages/QuestionsPage";
+import RunsPage from "./pages/RunsPage";
+import { ReviewerProvider } from "./state/reviewer";
 
 export default function App() {
   return (
-    <div className="mx-auto w-full max-w-[1180px] px-6 pb-24">
-      <Masthead />
-      <main className="pt-6">
-        <Routes>
-          <Route path="/" element={<ReportsView />} />
-          <Route path="/approvals" element={<ApprovalsView />} />
-          <Route path="*" element={<ReportsView />} />
-        </Routes>
-      </main>
-    </div>
+    <ReviewerProvider>
+      <Routes>
+        <Route element={<AppLayout />}>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/responses" element={<ResponsesPage />} />
+          <Route path="/alerts" element={<AlertsPage />} />
+          <Route path="/comparison" element={<ComparisonPage />} />
+          <Route path="/questions" element={<QuestionsPage />} />
+          {/* Keep the old direct Approvals path working; it lives under Question Repository now. */}
+          <Route path="/approvals" element={<QuestionsPage />} />
+          <Route path="/runs" element={<RunsPage />} />
+          <Route path="*" element={<DashboardPage />} />
+        </Route>
+      </Routes>
+    </ReviewerProvider>
   );
 }

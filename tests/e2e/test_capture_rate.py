@@ -207,5 +207,11 @@ def test_interrupted_run_resumes_without_duplicates(store, targets):
     per_question: dict[str, int] = {}
     for r in all_rows:
         per_question[r.question_id] = per_question.get(r.question_id, 0) + 1
+    # Fan-out is persona-aware, not uniform: PROVIDER questions also reach the active provider-
+    # evidence-dev target. Each question must have exactly its persona's active-target count — one
+    # full fan-out, no duplicates.
+    expected_fanout = {
+        q.question_id: len(targets_for_persona(targets, q.persona)) for q in approved
+    }
     assert per_question[first.question_id] == before  # untouched
-    assert max(per_question.values()) == min(per_question.values())  # uniform fan-out, no dups
+    assert per_question == expected_fanout

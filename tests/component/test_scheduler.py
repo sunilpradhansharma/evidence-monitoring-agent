@@ -48,6 +48,8 @@ def test_run_once_assigns_run_id_and_returns_summary(tmp_path):
 
     assert isinstance(summary, RunSummary)
     assert summary.run_id  # unique id assigned by the run manager
-    assert summary.responses_by_status == {"SUCCESS": 9}
+    # 10 = persona-aware fan-out (the PROVIDER question also reaches the active provider-evidence-dev
+    # target, on top of the 3 unconditional providers serving every persona).
+    assert summary.responses_by_status == {"SUCCESS": 10}
     assert summary.total_tokens > 0
     assert summary.est_cost > 0
