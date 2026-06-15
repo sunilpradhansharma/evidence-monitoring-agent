@@ -13,12 +13,14 @@ values flow through as opaque data — nothing is enumerated here.
 from __future__ import annotations
 
 from evidence_monitor.dashboard.render import (
+    DashboardData,
     ReportData,
+    build_dashboard,
     build_report,
     latest_per_question,
 )
 from evidence_monitor.data_access.interface import DataAccess, QueryFilters
-from evidence_monitor.data_access.models import ApprovalStatus, Persona
+from evidence_monitor.data_access.models import ApprovalStatus, LLMTarget, Persona
 from evidence_monitor.question_repo.repository import QuestionService
 
 # active-flag rule per status, mirroring the server-rendered views: PENDING/APPROVED are the
@@ -163,6 +165,119 @@ def report_payload(store: DataAccess, run_id: str) -> dict:
     return _report_to_dict(data)
 
 
+def _dashboard_to_dict(data: DashboardData) -> dict:
+    """Serialize a :class:`DashboardData` (from ``render.build_dashboard``) to a JSON dict.
+
+    Pure serialization — every figure is already computed by ``build_dashboard``. Per-target
+    classification (``is_full_llm`` / ``kind``) is surfaced so the frontend can tell a general LLM
+    from a limited/dev target (e.g. the provider-only stand-in) and label it accordingly.
+    """
+    k = data.kpis
+    run = k.last_run
+    last_run = None
+    if run is not None:
+        last_run = {
+            "run_id": run.run_id,
+            "started_at": run.started_at.isoformat() if run.started_at else None,
+            "ended_at": run.ended_at.isoformat() if run.ended_at else None,
+            "responses_captured": run.responses_captured,
+            "questions_attempted": run.questions_attempted,
+            "total_tokens": run.total_tokens,
+        }
+    return {
+        "include_dev": data.include_dev,
+        "filters": data.filters,
+        "options": {
+            "personas": data.options.personas,
+            "llms": data.options.llms,
+            "therapeutic_areas": data.options.therapeutic_areas,
+        },
+        "targets": [
+            {
+                "target_id": t.target_id,
+                "display_name": t.display_name,
+                "is_full_llm": t.is_full_llm,
+                "kind": t.kind,
+            }
+            for t in data.targets
+        ],
+        "kpis": {
+            "responses_total": k.responses_total,
+            "responses_captured": k.responses_captured,
+            "success_rate": k.success_rate,
+            "scored": k.scored,
+            "avg_sentiment": k.avg_sentiment,
+            "active_alerts": k.active_alerts,
+            "positioned": k.positioned,
+            "favourable": k.favourable,
+            "favourable_pct": k.favourable_pct,
+            "last_run": last_run,
+        },
+        "sentiment_histogram": {
+            "bucket_edges": list(data.bucket_edges),
+            "series": [{"target_id": s.target_id, "counts": s.counts} for s in data.histogram],
+        },
+        "positioning": {
+            "order": list(data.position_order),
+            "series": [
+                {"target_id": s.target_id, "counts": s.counts, "total": s.total}
+                for s in data.positioning
+            ],
+        },
+        "heatmap": {
+            "therapeutic_areas": data.therapeutic_areas,
+            "rows": [
+                {
+                    "target_id": row.target_id,
+                    "cells": [
+                        {
+                            "therapeutic_area": c.therapeutic_area,
+                            "mean": c.mean,
+                            "count": c.count,
+                        }
+                        for c in row.cells
+                    ],
+                }
+                for row in data.heatmap
+            ],
+        },
+        "volume_by_week": [{"week": w.week, "counts": w.counts} for w in data.volume_by_week],
+        "recent_alerts": [
+            {
+                "response_id": a.response_id,
+                "question_id": a.question_id,
+                "question_text": a.question_text,
+                "model": a.model,
+                "persona": a.persona,
+                "alert_type": a.alert_type,
+                "severity": a.severity,
+                "sentiment": a.sentiment,
+                "created_at": a.created_at,
+                "rules": [
+                    {"rule": str(r.rule_fired), "severity": r.severity, "reason": r.reason}
+                    for r in a.rules
+                ],
+            }
+            for a in data.recent_alerts
+        ],
+    }
+
+
+def dashboard_payload(
+    store: DataAccess,
+    *,
+    filters: QueryFilters | None = None,
+    llms: set[str] | None = None,
+    include_dev: bool = False,
+    targets: list[LLMTarget] | None = None,
+) -> dict:
+    """Full Dashboard aggregate honoring the filter bar (read-only). Reuses ``build_dashboard``."""
+    data = build_dashboard(
+        store, filters=filters, llms=llms, include_dev=include_dev, targets=targets
+    )
+    return _dashboard_to_dict(data)
+
+
 def _question_to_dict(q) -> dict:
     return {
         "question_id": q.question_id,
@@ -255,6 +370,7 @@ def response_payload(store: DataAccess, response_id: str) -> dict:
 
 
 __all__ = [
+    "dashboard_payload",
     "questions_payload",
     "report_payload",
     "response_payload",

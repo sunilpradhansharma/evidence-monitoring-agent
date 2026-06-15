@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -41,6 +41,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from evidence_monitor.config.settings import Settings, credential_preflight, get_settings
 from evidence_monitor.dashboard.json_api import (
+    dashboard_payload,
     questions_payload,
     report_payload,
     response_payload,
@@ -63,6 +64,7 @@ from evidence_monitor.data_access.models import (
 )
 from evidence_monitor.data_access.queries import to_csv, to_json
 from evidence_monitor.data_access.sqlite_store import SqliteStore
+from evidence_monitor.llm.registry import load_targets
 from evidence_monitor.question_repo.approval import ApprovalError, approval_audit_event
 from evidence_monitor.question_repo.repository import QuestionService
 
@@ -186,6 +188,26 @@ def _as_bool(value: str | None) -> bool | None:
     if value in (None, ""):
         return None
     return value.lower() in ("1", "true", "yes", "on")
+
+
+# Dashboard period presets → a lookback window. "all"/unrecognized means no date bound.
+_PERIOD_DAYS = {"7d": 7, "30d": 30}
+
+
+def _period_date_from(period: str | None, *, now: datetime | None = None) -> datetime | None:
+    """Translate a period preset (``7d`` / ``30d`` / ``all``) into a ``date_from`` cutoff."""
+    days = _PERIOD_DAYS.get((period or "all").lower())
+    if days is None:
+        return None
+    return (now or datetime.now(UTC)) - timedelta(days=days)
+
+
+def _llms_from_params(params) -> set[str] | None:
+    """Multi-select LLM filter (repeated ``llm=`` and/or comma-separated); None if empty."""
+    values: list[str] = []
+    for raw in params.getlist("llm"):
+        values.extend(part.strip() for part in raw.split(",") if part.strip())
+    return set(values) or None
 
 
 # --------------------------------------------------------------------------- #
@@ -480,6 +502,33 @@ def _register_api(app: FastAPI) -> None:
             return report_payload(store, run_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=f"unknown run_id: {run_id}") from exc
+
+    @app.get("/api/dashboard")
+    def api_dashboard(request: Request, store: StoreDep, settings: SettingsDep):
+        """Dashboard aggregate honoring the filter bar (persona / LLM multi-select / therapy /
+        period) plus the ``include_dev`` toggle. Read-only; reuses ``build_dashboard``.
+
+        The PROVIDER-only dev stand-in is excluded by default (``include_dev`` falsey) so the three
+        general LLMs are the clean comparison; pass ``include_dev=true`` to fold it in. Per-target
+        classification is always returned so the UI can render the toggle and distinguish targets.
+        """
+        params = request.query_params
+        filters = QueryFilters(
+            persona=_enum_or_none(Persona, params.get("persona")),
+            therapeutic_area=params.get("therapeutic_area") or None,
+            date_from=_period_date_from(params.get("period")),
+        )
+        try:
+            targets = load_targets(settings.targets_config_path)
+        except (OSError, ValueError):
+            targets = None  # classification falls back to "full LLM"; dashboard still renders
+        return dashboard_payload(
+            store,
+            filters=filters,
+            llms=_llms_from_params(params),
+            include_dev=bool(_as_bool(params.get("include_dev"))),
+            targets=targets,
+        )
 
     @app.get("/api/questions")
     def api_questions(store: StoreDep, status: str | None = None, persona: str | None = None):

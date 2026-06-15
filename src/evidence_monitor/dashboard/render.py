@@ -36,6 +36,7 @@ from evidence_monitor.data_access.models import (
     CitationStatus,
     CompetitivePosition,
     Domain,
+    LLMTarget,
     Persona,
     Question,
     ResponseStatus,
@@ -540,6 +541,347 @@ def _filter_echo(filters: QueryFilters) -> dict[str, str]:
 
 
 # --------------------------------------------------------------------------- #
+# Dashboard view (Stage 2) — a richer, filter-driven overview built from the SAME read-only
+# per-response scan as build_report. It adds NO capture/scoring/alert logic; it only re-shapes
+# stored records into the dashboard's widgets. A "limited/dev" target (one that does not serve every
+# persona — e.g. the provider-only PubMed+Claude stand-in) is classified per-target and, by default,
+# excluded from the aggregate KPIs/charts so its small sample never silently skews the LLM picture.
+# --------------------------------------------------------------------------- #
+
+# Eight fixed sentiment buckets spanning the full -1..+1 scale (width 0.25). Display-only edges for
+# the grouped histogram; the last bucket is inclusive of +1.0.
+_BUCKET_EDGES: tuple[float, ...] = (-1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0)
+_BUCKET_COUNT = len(_BUCKET_EDGES) - 1
+
+# How many flagged responses the dashboard's "recent alerts" strip shows (latest first).
+_RECENT_ALERTS_LIMIT = 8
+
+
+def _bucket_index(sentiment: float) -> int:
+    """Map a sentiment in [-1, 1] to a histogram bucket index in [0, _BUCKET_COUNT-1]."""
+    idx = int((sentiment + 1.0) / 0.25)
+    return max(0, min(_BUCKET_COUNT - 1, idx))
+
+
+def _iso_week(date_iso) -> str:
+    """ISO-year/week label, e.g. ``2026-W24`` (groups volume-over-time by week)."""
+    y, w, _ = date_iso.isocalendar()
+    return f"{y}-W{w:02d}"
+
+
+@dataclass(frozen=True)
+class TargetMeta:
+    """Per-target classification so the UI can distinguish a general LLM from a limited/dev target.
+
+    ``is_full_llm`` is True when the target serves EVERY persona (the general-purpose LLMs); one
+    that serves only a subset of personas (the provider-only dev stand-in) is limited. Content-
+    agnostic: only structural provider ids and personas are read — never brand/indication names.
+    """
+
+    target_id: str
+    display_name: str
+    is_full_llm: bool
+    kind: str  # "llm" | "dev"
+
+
+@dataclass(frozen=True)
+class DashboardKpis:
+    """The five KPI cards' numbers (all over the INCLUDED target set — see ``include_dev``)."""
+
+    responses_total: int = 0
+    responses_captured: int = 0
+    success_rate: float = 0.0
+    scored: int = 0
+    avg_sentiment: float = 0.0
+    active_alerts: int = 0
+    positioned: int = 0
+    favourable: int = 0
+    favourable_pct: float = 0.0
+    last_run: Run | None = None
+
+
+@dataclass(frozen=True)
+class HistogramSeries:
+    """One LLM's sentiment distribution across the fixed buckets (aligned to _BUCKET_EDGES)."""
+
+    target_id: str
+    counts: list[int]
+
+
+@dataclass(frozen=True)
+class PositionSeries:
+    """One LLM's competitive-position counts (the frontend computes % share from counts/total)."""
+
+    target_id: str
+    counts: dict[str, int]
+    total: int
+
+
+@dataclass(frozen=True)
+class HeatmapCell:
+    """Mean sentiment for one (LLM x therapeutic-area) cell; ``mean`` is None when there is no data
+    (rendered as n/a, never as a misleading 'absent/negative' score)."""
+
+    therapeutic_area: str
+    mean: float | None
+    count: int
+
+
+@dataclass(frozen=True)
+class HeatmapRow:
+    target_id: str
+    cells: list[HeatmapCell]
+
+
+@dataclass(frozen=True)
+class WeekVolume:
+    """Responses captured in one ISO week, split by status (all four statuses always present)."""
+
+    week: str
+    counts: dict[str, int]
+
+
+@dataclass(frozen=True)
+class RecentAlert:
+    """A latest-first flagged response for the dashboard strip (drill-through by response_id)."""
+
+    response_id: str
+    question_id: str
+    question_text: str
+    model: str
+    persona: str
+    alert_type: str
+    severity: int
+    sentiment: float | None
+    created_at: str
+    rules: list[Alert]
+
+
+@dataclass(frozen=True)
+class DashboardData:
+    """Everything the Dashboard page needs — KPIs, charts, target classification, filter context."""
+
+    kpis: DashboardKpis
+    targets: list[TargetMeta]
+    bucket_edges: tuple[float, ...]
+    histogram: list[HistogramSeries]
+    positioning: list[PositionSeries]
+    position_order: tuple[str, ...]
+    therapeutic_areas: list[str]
+    heatmap: list[HeatmapRow]
+    volume_by_week: list[WeekVolume]
+    recent_alerts: list[RecentAlert]
+    options: ReportOptions
+    filters: dict[str, str]
+    include_dev: bool
+
+
+def _target_metas(targets: list[LLMTarget] | None, llm_names: set[str]) -> dict[str, TargetMeta]:
+    """Classify every llm_name present in the data, using config personas (a target that serves all
+    personas is a full LLM; a strict subset is a limited/dev target). Unknown names default to full.
+    Display names come from config's structural ``llm_name``; the frontend relabels the dev target.
+    """
+    persona_count = len(Persona)
+    by_name = {t.llm_name: t for t in (targets or [])}
+    metas: dict[str, TargetMeta] = {}
+    for name in llm_names:
+        t = by_name.get(name)
+        is_full = True if t is None else len(set(t.personas)) >= persona_count
+        metas[name] = TargetMeta(
+            target_id=name,
+            display_name=name,
+            is_full_llm=is_full,
+            kind="llm" if is_full else "dev",
+        )
+    return metas
+
+
+def _ordered_targets(metas: dict[str, TargetMeta], present: set[str]) -> list[str]:
+    """Chart series/row order: full LLMs first (alphabetical), limited/dev targets last."""
+    return sorted(present, key=lambda n: (not metas[n].is_full_llm, n))
+
+
+def build_dashboard(
+    store: DataAccess,
+    *,
+    filters: QueryFilters | None = None,
+    llms: set[str] | None = None,
+    include_dev: bool = False,
+    targets: list[LLMTarget] | None = None,
+) -> DashboardData:
+    """Aggregate the Dashboard widgets from the read-only response repository.
+
+    ``filters`` (persona / therapeutic-area / date range) constrain the universe at the data layer;
+    ``llms`` (a multi-select) and ``include_dev`` are applied as view-layer filters in memory so the
+    data-access seam is unchanged. When ``include_dev`` is False (the default), responses from
+    limited/dev targets are excluded from EVERY widget and KPI, so the three general LLMs are the
+    clean default comparison. The full target classification is always returned so the UI can still
+    offer the "Include Provider evidence (dev)" toggle.
+    """
+    filters = filters or QueryFilters()
+    universe = store.responses.query(filters, page_size=None).items
+
+    # Classify every target present in the persona/therapy/period universe (before llm/dev gating)
+    # so the toggle + multiselect stay stable regardless of what is currently included.
+    metas = _target_metas(targets, {r.llm_name for r in universe})
+
+    def _included(r: Response) -> bool:
+        if llms is not None and r.llm_name not in llms:
+            return False
+        return include_dev or metas[r.llm_name].is_full_llm
+
+    responses = [r for r in universe if _included(r)]
+
+    # Single pass: latest score per response feeds sentiment / position / heatmap; status feeds
+    # volume + capture. Mirrors build_report's accumulation (no new judgement).
+    scores: dict[str, ScoringRecord | None] = {}
+    status_counts: Counter[ResponseStatus] = Counter()
+    histogram: dict[str, list[int]] = defaultdict(lambda: [0] * _BUCKET_COUNT)
+    position_counts: dict[str, Counter[str]] = defaultdict(Counter)
+    heat: dict[tuple[str, str], list[float]] = defaultdict(lambda: [0.0, 0.0])  # [sum, count]
+    week_counts: dict[str, Counter[str]] = defaultdict(Counter)
+    sentiment_total = 0.0
+    scored = 0
+    favourable = 0
+
+    for r in responses:
+        status_counts[r.status] += 1
+        week_counts[_iso_week(r.timestamp_utc.date())][str(r.status)] += 1
+        score = store.scores.latest_for(r.response_id)
+        scores[r.response_id] = score
+        if score is None:
+            continue
+        scored += 1
+        sentiment_total += score.sentiment_score
+        histogram[r.llm_name][_bucket_index(score.sentiment_score)] += 1
+        position_counts[r.llm_name][str(score.competitive_position)] += 1
+        if score.competitive_position in (
+            CompetitivePosition.FIRST_LINE_RECOMMENDED,
+            CompetitivePosition.AMONG_OPTIONS,
+        ):
+            favourable += 1
+        cell = heat[(r.llm_name, r.therapeutic_area)]
+        cell[0] += score.sentiment_score
+        cell[1] += 1
+
+    # Active alerts on the included, in-scope responses (same scoping as build_report).
+    in_scope = {r.response_id for r in responses}
+    alerts_by_response: dict[str, list[Alert]] = defaultdict(list)
+    for a in store.alerts.list(order_by_severity=True):
+        if a.response_id in in_scope:
+            alerts_by_response[a.response_id].append(a)
+    active_alerts = sum(len(a) for a in alerts_by_response.values())
+
+    metrics = RunMetrics(
+        total=len(responses),
+        success=status_counts[ResponseStatus.SUCCESS],
+        truncated=status_counts[ResponseStatus.TRUNCATED],
+        failed=status_counts[ResponseStatus.FAILED],
+        blocked=status_counts[ResponseStatus.BLOCKED],
+    )
+    runs = store.runs.list()
+    kpis = DashboardKpis(
+        responses_total=metrics.total,
+        responses_captured=metrics.captured,
+        success_rate=metrics.capture_rate,
+        scored=scored,
+        avg_sentiment=(sentiment_total / scored if scored else 0.0),
+        active_alerts=active_alerts,
+        positioned=scored,
+        favourable=favourable,
+        favourable_pct=(favourable / scored if scored else 0.0),
+        last_run=runs[0] if runs else None,
+    )
+
+    present = {r.llm_name for r in responses}
+    order = _ordered_targets(metas, present)
+    therapy_areas = sorted({r.therapeutic_area for r in responses})
+
+    histogram_series = [HistogramSeries(target_id=n, counts=histogram[n]) for n in order]
+    positioning_series = [
+        PositionSeries(
+            target_id=n, counts=dict(position_counts[n]), total=sum(position_counts[n].values())
+        )
+        for n in order
+    ]
+    heatmap = [
+        HeatmapRow(
+            target_id=n,
+            cells=[
+                HeatmapCell(
+                    therapeutic_area=ta,
+                    mean=(heat[(n, ta)][0] / heat[(n, ta)][1] if heat[(n, ta)][1] else None),
+                    count=int(heat[(n, ta)][1]),
+                )
+                for ta in therapy_areas
+            ],
+        )
+        for n in order
+    ]
+    volume_by_week = [
+        WeekVolume(
+            week=wk,
+            counts={s.value: week_counts[wk].get(s.value, 0) for s in ResponseStatus},
+        )
+        for wk in sorted(week_counts)
+    ]
+
+    recent = _recent_alerts(store, alerts_by_response, scores)
+
+    return DashboardData(
+        kpis=kpis,
+        targets=[metas[n] for n in _ordered_targets(metas, set(metas))],
+        bucket_edges=_BUCKET_EDGES,
+        histogram=histogram_series,
+        positioning=positioning_series,
+        position_order=tuple(p.value for p in CompetitivePosition),
+        therapeutic_areas=therapy_areas,
+        heatmap=heatmap,
+        volume_by_week=volume_by_week,
+        recent_alerts=recent,
+        options=_options(store),
+        filters={k: v for k, v in _filter_echo(filters).items() if v},
+        include_dev=include_dev,
+    )
+
+
+def _recent_alerts(
+    store: DataAccess,
+    alerts_by_response: dict[str, list[Alert]],
+    scores: dict[str, ScoringRecord | None],
+) -> list[RecentAlert]:
+    """Build the latest-first 'recent alerts' strip from the in-scope flagged responses."""
+    items: list[RecentAlert] = []
+    q_cache: dict[str, Question | None] = {}
+    for rid, alerts in alerts_by_response.items():
+        response = store.responses.get(rid)
+        if response is None:
+            continue
+        if response.question_id not in q_cache:
+            q_cache[response.question_id] = store.questions.get(response.question_id)
+        q = q_cache[response.question_id]
+        top = max(alerts, key=lambda a: a.severity)
+        score = scores.get(rid)
+        latest_at = max((a.created_at for a in alerts), default=response.timestamp_utc)
+        items.append(
+            RecentAlert(
+                response_id=rid,
+                question_id=response.question_id,
+                question_text=q.question_text if q is not None else "",
+                model=response.llm_name,
+                persona=str(response.persona),
+                alert_type=_ALERT_TYPE.get(top.rule_fired, str(top.rule_fired)),
+                severity=top.severity,
+                sentiment=score.sentiment_score if score is not None else None,
+                created_at=latest_at.isoformat(),
+                rules=alerts,
+            )
+        )
+    items.sort(key=lambda i: i.created_at, reverse=True)
+    return items[:_RECENT_ALERTS_LIMIT]
+
+
+# --------------------------------------------------------------------------- #
 # Approved-questions view (Approvals tab, READ-ONLY) — through the question-repo read path
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
@@ -691,13 +1033,23 @@ __all__ = [
     "ApprovedQuestionsView",
     "CoverageCell",
     "CoverageRow",
+    "DashboardData",
+    "DashboardKpis",
     "FlaggedResponse",
     "Headline",
+    "HeatmapCell",
+    "HeatmapRow",
+    "HistogramSeries",
+    "PositionSeries",
+    "RecentAlert",
     "ReportData",
     "ReportOptions",
     "RunMetrics",
     "SentimentAgg",
+    "TargetMeta",
+    "WeekVolume",
     "build_approved_questions",
+    "build_dashboard",
     "build_report",
     "latest_per_question",
     "render_app",

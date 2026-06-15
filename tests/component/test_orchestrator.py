@@ -194,8 +194,8 @@ def test_resume_skips_completed_questions_without_duplicates(store, targets):
     done_qid = _simulate_first_question_completed(store, targets, interrupted.run_id)
     remaining_qids = {q.question_id for q in approved if q.question_id != done_qid}
 
-    # Persona-aware fan-out: the PROVIDER question reaches 4 active targets (incl. provider-evidence-
-    # dev) and the others 3, so per-question counts are NOT uniform. Total over the bank is 10.
+    # Persona-aware fan-out: the PROVIDER question reaches 4 active targets (incl. the dev stand-in)
+    # and the others 3, so per-question counts are NOT uniform. Total over the bank is 10.
     fanout = {q.question_id: len(targets_for_persona(targets, q.persona)) for q in approved}
     total_fanout = sum(fanout.values())
 

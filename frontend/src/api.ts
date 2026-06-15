@@ -143,6 +143,87 @@ export interface AlertRecord {
   created_at: string | null;
 }
 
+// --- Dashboard (Stage 2) --------------------------------------------------------------------- //
+export interface DashTarget {
+  target_id: string;
+  display_name: string;
+  is_full_llm: boolean;
+  kind: string; // "llm" | "dev"
+}
+
+export interface DashKpis {
+  responses_total: number;
+  responses_captured: number;
+  success_rate: number;
+  scored: number;
+  avg_sentiment: number;
+  active_alerts: number;
+  positioned: number;
+  favourable: number;
+  favourable_pct: number;
+  last_run: {
+    run_id: string;
+    started_at: string | null;
+    ended_at: string | null;
+    responses_captured: number;
+    questions_attempted: number;
+    total_tokens: number;
+  } | null;
+}
+
+export interface DashHeatCell {
+  therapeutic_area: string;
+  mean: number | null;
+  count: number;
+}
+
+export interface DashRecentAlert {
+  response_id: string;
+  question_id: string;
+  question_text: string;
+  model: string;
+  persona: string;
+  alert_type: string;
+  severity: number;
+  sentiment: number | null;
+  created_at: string;
+  rules: { rule: string; severity: number; reason: string }[];
+}
+
+export interface Dashboard {
+  include_dev: boolean;
+  filters: Record<string, string>;
+  options: { personas: string[]; llms: string[]; therapeutic_areas: string[] };
+  targets: DashTarget[];
+  kpis: DashKpis;
+  sentiment_histogram: { bucket_edges: number[]; series: { target_id: string; counts: number[] }[] };
+  positioning: {
+    order: string[];
+    series: { target_id: string; counts: Record<string, number>; total: number }[];
+  };
+  heatmap: { therapeutic_areas: string[]; rows: { target_id: string; cells: DashHeatCell[] }[] };
+  volume_by_week: { week: string; counts: Record<string, number> }[];
+  recent_alerts: DashRecentAlert[];
+}
+
+export interface DashboardFilters {
+  persona?: string;
+  therapeutic_area?: string;
+  period?: string;
+  include_dev?: boolean;
+  llms?: string[];
+}
+
+export function getDashboard(f: DashboardFilters): Promise<Dashboard> {
+  const p = new URLSearchParams();
+  if (f.persona) p.set("persona", f.persona);
+  if (f.therapeutic_area) p.set("therapeutic_area", f.therapeutic_area);
+  if (f.period) p.set("period", f.period);
+  if (f.include_dev) p.set("include_dev", "true");
+  (f.llms ?? []).forEach((l) => p.append("llm", l));
+  return getJSON<Dashboard>(`/api/dashboard?${p.toString()}`);
+}
+
 async function getJSON<T>(url: string): Promise<T> {
   const resp = await fetch(url, { headers: { Accept: "application/json" } });
   if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
