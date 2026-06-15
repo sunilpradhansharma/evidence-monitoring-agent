@@ -6,8 +6,14 @@ export interface RunSummary {
   trigger_type: string;
   started_at: string | null;
   ended_at: string | null;
+  duration_seconds: number | null;
+  questions_attempted: number;
   responses_captured: number;
   failure_count: number;
+  total_tokens: number;
+  est_cost: number;
+  alert_count: number;
+  status: string; // RUNNING | PARTIAL | COMPLETED
 }
 
 export interface Metrics {
@@ -100,11 +106,13 @@ export interface QuestionItem {
   version: number;
   persona: string;
   therapeutic_area: string;
+  brand_focus: string;
   domain: string;
   question_text: string;
   approval_status: string;
   approver_name: string | null;
   approval_note: string | null;
+  active: boolean;
   updated_at: string | null;
 }
 
@@ -207,6 +215,7 @@ export interface Dashboard {
 }
 
 export interface DashboardFilters {
+  run_id?: string;
   persona?: string;
   therapeutic_area?: string;
   period?: string;
@@ -216,6 +225,7 @@ export interface DashboardFilters {
 
 export function getDashboard(f: DashboardFilters): Promise<Dashboard> {
   const p = new URLSearchParams();
+  if (f.run_id) p.set("run_id", f.run_id);
   if (f.persona) p.set("persona", f.persona);
   if (f.therapeutic_area) p.set("therapeutic_area", f.therapeutic_area);
   if (f.period) p.set("period", f.period);
@@ -223,6 +233,141 @@ export function getDashboard(f: DashboardFilters): Promise<Dashboard> {
   (f.llms ?? []).forEach((l) => p.append("llm", l));
   return getJSON<Dashboard>(`/api/dashboard?${p.toString()}`);
 }
+
+// --- Responses table (Stage 3) --------------------------------------------------------------- //
+export interface ResponseRow {
+  response_id: string;
+  timestamp_utc: string;
+  llm_name: string;
+  persona: string;
+  therapeutic_area: string;
+  domain: string;
+  status: string;
+  question_id: string;
+  question_text: string;
+  sentiment: number | null;
+  competitive_position: string | null;
+  citation_status: string | null;
+  has_alert: boolean;
+}
+export interface ResponsesTable {
+  items: ResponseRow[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+export interface ResponsesQuery {
+  run_id?: string;
+  persona?: string;
+  status?: string;
+  therapeutic_area?: string;
+  period?: string;
+  llms?: string[];
+  search?: string;
+  page?: number;
+  page_size?: number;
+}
+function responsesParams(q: ResponsesQuery): URLSearchParams {
+  const p = new URLSearchParams();
+  if (q.run_id) p.set("run_id", q.run_id);
+  if (q.persona) p.set("persona", q.persona);
+  if (q.status) p.set("status", q.status);
+  if (q.therapeutic_area) p.set("therapeutic_area", q.therapeutic_area);
+  if (q.period) p.set("period", q.period);
+  if (q.search) p.set("search", q.search);
+  if (q.page) p.set("page", String(q.page));
+  if (q.page_size) p.set("page_size", String(q.page_size));
+  (q.llms ?? []).forEach((l) => p.append("llm", l));
+  return p;
+}
+export const getResponsesTable = (q: ResponsesQuery) =>
+  getJSON<ResponsesTable>(`/api/responses?${responsesParams(q).toString()}`);
+
+// CSV export reuses the existing /reports/export endpoint (period → date_from; single LLM only).
+export function exportUrl(q: ResponsesQuery, format: "csv" | "json" = "csv"): string {
+  const p = new URLSearchParams();
+  p.set("format", format);
+  if (q.run_id) p.set("run_id", q.run_id);
+  if (q.persona) p.set("persona", q.persona);
+  if (q.status) p.set("status", q.status);
+  if (q.therapeutic_area) p.set("therapeutic_area", q.therapeutic_area);
+  if (q.llms && q.llms.length === 1) p.set("llm", q.llms[0]);
+  if (q.period === "7d" || q.period === "30d") {
+    const days = q.period === "7d" ? 7 : 30;
+    p.set("date_from", new Date(Date.now() - days * 864e5).toISOString());
+  }
+  return `/reports/export?${p.toString()}`;
+}
+
+// --- Alerts feed (Stage 3) -------------------------------------------------------------------- //
+export interface AlertFeedItem {
+  alert_id: string;
+  response_id: string;
+  question_id: string;
+  question_text: string;
+  model: string;
+  persona: string;
+  therapeutic_area: string;
+  rule: string;
+  alert_type: string;
+  severity: number;
+  reason: string;
+  sentiment: number | null;
+  created_at: string;
+}
+export interface AlertsFeed {
+  counts_by_rule: Record<string, number>;
+  counts_by_type: Record<string, number>;
+  total: number;
+  page: number;
+  page_size: number;
+  items: AlertFeedItem[];
+}
+export interface AlertsQuery {
+  rule?: string;
+  persona?: string;
+  llm?: string;
+  severity?: number;
+  period?: string;
+  page?: number;
+  page_size?: number;
+}
+export function getAlertsFeed(q: AlertsQuery): Promise<AlertsFeed> {
+  const p = new URLSearchParams();
+  if (q.rule) p.set("rule", q.rule);
+  if (q.persona) p.set("persona", q.persona);
+  if (q.llm) p.set("llm", q.llm);
+  if (q.severity != null) p.set("severity", String(q.severity));
+  if (q.period) p.set("period", q.period);
+  if (q.page) p.set("page", String(q.page));
+  if (q.page_size) p.set("page_size", String(q.page_size));
+  return getJSON<AlertsFeed>(`/api/alerts?${p.toString()}`);
+}
+
+// --- LLM Comparison (Stage 3) ----------------------------------------------------------------- //
+export interface ComparisonColumn {
+  response_id: string;
+  llm_name: string;
+  status: string;
+  finish_reason: string;
+  response_text: string;
+  block_reason: string | null;
+  sentiment: number | null;
+  competitive_position: string | null;
+  citation_status: string | null;
+  scoring_rationale: string | null;
+}
+export interface Comparison {
+  question_id: string;
+  question_text: string;
+  persona: string;
+  run_id: string;
+  columns: ComparisonColumn[];
+}
+export const getComparison = (questionId: string, runId: string) =>
+  getJSON<Comparison>(
+    `/api/comparison?question_id=${encodeURIComponent(questionId)}&run_id=${encodeURIComponent(runId)}`,
+  );
 
 async function getJSON<T>(url: string): Promise<T> {
   const resp = await fetch(url, { headers: { Accept: "application/json" } });
@@ -271,3 +416,16 @@ export const rejectQuestion = (id: string, approverName: string, reason: string)
     approver_name: approverName,
     reason,
   });
+
+// Edit reuses the EXISTING edit endpoint (creates a new version server-side; audited). Only the
+// supplied fields change. Not a new write path — the approval gate is untouched.
+export interface QuestionEdit {
+  question_text?: string;
+  persona?: string;
+  therapeutic_area?: string;
+  brand_focus?: string;
+  domain?: string;
+  active?: boolean;
+}
+export const editQuestion = (id: string, changes: QuestionEdit) =>
+  postJSON(`/approvals/questions/${encodeURIComponent(id)}/edit`, changes);

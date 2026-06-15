@@ -41,10 +41,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from evidence_monitor.config.settings import Settings, credential_preflight, get_settings
 from evidence_monitor.dashboard.json_api import (
+    alerts_feed_payload,
+    comparison_payload,
     dashboard_payload,
     questions_payload,
     report_payload,
     response_payload,
+    responses_table_payload,
     runs_payload,
 )
 from evidence_monitor.dashboard.render import (
@@ -514,6 +517,7 @@ def _register_api(app: FastAPI) -> None:
         """
         params = request.query_params
         filters = QueryFilters(
+            run_id=params.get("run_id") or None,
             persona=_enum_or_none(Persona, params.get("persona")),
             therapeutic_area=params.get("therapeutic_area") or None,
             date_from=_period_date_from(params.get("period")),
@@ -529,6 +533,49 @@ def _register_api(app: FastAPI) -> None:
             include_dev=bool(_as_bool(params.get("include_dev"))),
             targets=targets,
         )
+
+    @app.get("/api/responses")
+    def api_responses_table(request: Request, store: StoreDep, page: int = 1, page_size: int = 25):
+        """Filterable, paginated Responses table (read-only). Server filters: run / persona / status
+        / therapy / period; LLM multi-select + free-text search are view-layer refinements."""
+        params = request.query_params
+        filters = QueryFilters(
+            run_id=params.get("run_id") or None,
+            persona=_enum_or_none(Persona, params.get("persona")),
+            therapeutic_area=params.get("therapeutic_area") or None,
+            status=_enum_or_none(ResponseStatus, params.get("status")),
+            date_from=_period_date_from(params.get("period")),
+        )
+        return responses_table_payload(
+            store,
+            filters=filters,
+            llms=_llms_from_params(params),
+            search=params.get("search") or None,
+            page=page,
+            page_size=page_size,
+        )
+
+    @app.get("/api/alerts")
+    def api_alerts(request: Request, store: StoreDep, page: int = 1, page_size: int = 25):
+        """Enriched, filterable, paginated alert feed + global per-type counts (read-only)."""
+        params = request.query_params
+        sev = params.get("severity")
+        severity = int(sev) if sev and sev.isdigit() else None
+        return alerts_feed_payload(
+            store,
+            rule=params.get("rule") or None,
+            persona=params.get("persona") or None,
+            llm=params.get("llm") or None,
+            severity=severity,
+            date_from=_period_date_from(params.get("period")),
+            page=page,
+            page_size=page_size,
+        )
+
+    @app.get("/api/comparison")
+    def api_comparison(store: StoreDep, question_id: str, run_id: str):
+        """All targets' answers + scores for one (question_id, run_id) — side-by-side view."""
+        return comparison_payload(store, question_id=question_id, run_id=run_id)
 
     @app.get("/api/questions")
     def api_questions(store: StoreDep, status: str | None = None, persona: str | None = None):

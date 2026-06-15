@@ -882,6 +882,258 @@ def _recent_alerts(
 
 
 # --------------------------------------------------------------------------- #
+# Page feeds (Stage 3) — Responses table, Alerts feed, LLM Comparison. All read-only; each reuses
+# the SAME store query path + latest-score / question-text lookups as the Reports view. No new
+# capture/scoring/alert logic. Limited/dev targets are NOT filtered out here (these are full,
+# auditable feeds); the frontend tags them. Aggregation stays content-agnostic.
+# --------------------------------------------------------------------------- #
+def _paginate(items: list, page: int, page_size: int) -> list:
+    start = max(0, (page - 1) * page_size)
+    return items[start : start + page_size]
+
+
+@dataclass(frozen=True)
+class ResponseRow:
+    """One row of the Responses table (no full body — the body is fetched on row click)."""
+
+    response_id: str
+    timestamp_utc: str
+    llm_name: str
+    persona: str
+    therapeutic_area: str
+    domain: str
+    status: str
+    question_id: str
+    question_text: str
+    sentiment: float | None
+    competitive_position: str | None
+    citation_status: str | None
+    has_alert: bool
+
+
+@dataclass(frozen=True)
+class ResponsesTable:
+    items: list[ResponseRow]
+    total: int
+    page: int
+    page_size: int
+
+
+def build_responses_table(
+    store: DataAccess,
+    *,
+    filters: QueryFilters | None = None,
+    llms: set[str] | None = None,
+    search: str | None = None,
+    page: int = 1,
+    page_size: int = 25,
+) -> ResponsesTable:
+    """Filterable, paginated Responses table. ``filters`` is applied at the data layer; ``llms``
+    (multi-select) and ``search`` are view-layer refinements (the seam stays single-LLM). Rows are
+    enriched with the latest score summary + question text; only the page slice is enriched."""
+    filters = filters or QueryFilters()
+    rows = store.responses.query(filters, page_size=None).items
+    alert_ids = {a.response_id for a in store.alerts.list()}
+    q_cache: dict[str, Question | None] = {}
+
+    def _qtext(qid: str) -> str:
+        if qid not in q_cache:
+            q_cache[qid] = store.questions.get(qid)
+        q = q_cache[qid]
+        return q.question_text if q is not None else ""
+
+    if llms:
+        rows = [r for r in rows if r.llm_name in llms]
+    if search:
+        needle = search.strip().lower()
+        rows = [
+            r
+            for r in rows
+            if needle in r.question_id.lower()
+            or needle in r.llm_name.lower()
+            or needle in r.therapeutic_area.lower()
+            or needle in str(r.persona).lower()
+            or needle in str(r.status).lower()
+            or needle in _qtext(r.question_id).lower()
+        ]
+
+    total = len(rows)
+    items: list[ResponseRow] = []
+    for r in _paginate(rows, page, page_size):
+        s = store.scores.latest_for(r.response_id)
+        items.append(
+            ResponseRow(
+                response_id=r.response_id,
+                timestamp_utc=r.timestamp_utc.isoformat(),
+                llm_name=r.llm_name,
+                persona=str(r.persona),
+                therapeutic_area=r.therapeutic_area,
+                domain=str(r.domain),
+                status=str(r.status),
+                question_id=r.question_id,
+                question_text=_qtext(r.question_id),
+                sentiment=s.sentiment_score if s is not None else None,
+                competitive_position=str(s.competitive_position) if s is not None else None,
+                citation_status=str(s.citation_status) if s is not None else None,
+                has_alert=r.response_id in alert_ids,
+            )
+        )
+    return ResponsesTable(items=items, total=total, page=page, page_size=page_size)
+
+
+@dataclass(frozen=True)
+class AlertFeedItem:
+    alert_id: str
+    response_id: str
+    question_id: str
+    question_text: str
+    model: str
+    persona: str
+    therapeutic_area: str
+    rule: str
+    alert_type: str
+    severity: int
+    reason: str
+    sentiment: float | None
+    created_at: str
+
+
+@dataclass(frozen=True)
+class AlertsFeed:
+    items: list[AlertFeedItem]
+    total: int
+    counts_by_rule: dict[str, int]
+    counts_by_type: dict[str, int]
+
+
+def build_alerts_feed(
+    store: DataAccess,
+    *,
+    rule: str | None = None,
+    persona: str | None = None,
+    llm: str | None = None,
+    severity: int | None = None,
+    date_from=None,
+    page: int = 1,
+    page_size: int = 25,
+) -> AlertsFeed:
+    """Enriched, filterable, paginated alert feed. The per-type COUNTS are global (the real engine
+    rule types over ALL alerts), so the KPI tiles are stable; the feed items honor the filters."""
+    alerts = store.alerts.list(order_by_severity=True)
+    counts_by_rule = Counter(str(a.rule_fired) for a in alerts)
+    counts_by_type = Counter(_ALERT_TYPE.get(a.rule_fired, str(a.rule_fired)) for a in alerts)
+
+    q_cache: dict[str, Question | None] = {}
+
+    def _qtext(qid: str) -> str:
+        if qid not in q_cache:
+            q_cache[qid] = store.questions.get(qid)
+        q = q_cache[qid]
+        return q.question_text if q is not None else ""
+
+    enriched: list[AlertFeedItem] = []
+    for a in alerts:
+        r = store.responses.get(a.response_id)
+        if r is None:
+            continue
+        if persona and str(r.persona) != persona:
+            continue
+        if llm and r.llm_name != llm:
+            continue
+        if rule and str(a.rule_fired) != rule:
+            continue
+        if severity is not None and a.severity != severity:
+            continue
+        if date_from is not None and r.timestamp_utc < date_from:
+            continue
+        s = store.scores.latest_for(a.response_id)
+        enriched.append(
+            AlertFeedItem(
+                alert_id=a.alert_id,
+                response_id=a.response_id,
+                question_id=r.question_id,
+                question_text=_qtext(r.question_id),
+                model=r.llm_name,
+                persona=str(r.persona),
+                therapeutic_area=r.therapeutic_area,
+                rule=str(a.rule_fired),
+                alert_type=_ALERT_TYPE.get(a.rule_fired, str(a.rule_fired)),
+                severity=a.severity,
+                reason=a.reason,
+                sentiment=s.sentiment_score if s is not None else None,
+                created_at=a.created_at.isoformat(),
+            )
+        )
+    total = len(enriched)
+    return AlertsFeed(
+        items=_paginate(enriched, page, page_size),
+        total=total,
+        counts_by_rule=dict(counts_by_rule),
+        counts_by_type=dict(counts_by_type),
+    )
+
+
+@dataclass(frozen=True)
+class ComparisonColumn:
+    response_id: str
+    llm_name: str
+    status: str
+    finish_reason: str
+    response_text: str
+    block_reason: str | None
+    sentiment: float | None
+    competitive_position: str | None
+    citation_status: str | None
+    scoring_rationale: str | None
+
+
+@dataclass(frozen=True)
+class Comparison:
+    question_id: str
+    question_text: str
+    persona: str
+    run_id: str
+    columns: list[ComparisonColumn]
+
+
+def build_comparison(store: DataAccess, *, question_id: str, run_id: str) -> Comparison:
+    """Every target's full answer (+ its score) for one question in one run, for side-by-side view.
+    A target with no response simply has no column (correct for provider-only targets on non-
+    provider questions); the frontend notes empty/failed answers rather than showing blanks."""
+    rows = [
+        r
+        for r in store.responses.query(QueryFilters(run_id=run_id), page_size=None).items
+        if r.question_id == question_id
+    ]
+    rows.sort(key=lambda r: r.llm_name)
+    q = store.questions.get(question_id)
+    columns: list[ComparisonColumn] = []
+    for r in rows:
+        s = store.scores.latest_for(r.response_id)
+        columns.append(
+            ComparisonColumn(
+                response_id=r.response_id,
+                llm_name=r.llm_name,
+                status=str(r.status),
+                finish_reason=str(r.finish_reason),
+                response_text=r.response_text,
+                block_reason=r.block_reason,
+                sentiment=s.sentiment_score if s is not None else None,
+                competitive_position=str(s.competitive_position) if s is not None else None,
+                citation_status=str(s.citation_status) if s is not None else None,
+                scoring_rationale=s.scoring_rationale if s is not None else None,
+            )
+        )
+    return Comparison(
+        question_id=question_id,
+        question_text=q.question_text if q is not None else "",
+        persona=str(q.persona) if q is not None else "",
+        run_id=run_id,
+        columns=columns,
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Approved-questions view (Approvals tab, READ-ONLY) — through the question-repo read path
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
@@ -1028,14 +1280,20 @@ def write_static_report(
 
 
 __all__ = [
+    "AlertFeedItem",
+    "AlertsFeed",
     "ApprovalGate",
     "ApprovalOptions",
     "ApprovedQuestionsView",
+    "Comparison",
+    "ComparisonColumn",
     "CoverageCell",
     "CoverageRow",
     "DashboardData",
     "DashboardKpis",
     "FlaggedResponse",
+    "ResponseRow",
+    "ResponsesTable",
     "Headline",
     "HeatmapCell",
     "HeatmapRow",
@@ -1048,9 +1306,12 @@ __all__ = [
     "SentimentAgg",
     "TargetMeta",
     "WeekVolume",
+    "build_alerts_feed",
     "build_approved_questions",
+    "build_comparison",
     "build_dashboard",
     "build_report",
+    "build_responses_table",
     "latest_per_question",
     "render_app",
     "render_reports_section",

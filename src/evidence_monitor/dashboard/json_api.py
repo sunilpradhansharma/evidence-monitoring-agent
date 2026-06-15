@@ -15,8 +15,11 @@ from __future__ import annotations
 from evidence_monitor.dashboard.render import (
     DashboardData,
     ReportData,
+    build_alerts_feed,
+    build_comparison,
     build_dashboard,
     build_report,
+    build_responses_table,
     latest_per_question,
 )
 from evidence_monitor.data_access.interface import DataAccess, QueryFilters
@@ -32,19 +35,46 @@ _ACTIVE_BY_STATUS: dict[ApprovalStatus, bool | None] = {
 }
 
 
+def _run_status(run) -> str:
+    """Derive a display status from stored run fields (no new state): RUNNING if not yet ended,
+    PARTIAL if it ended with failures, else COMPLETED."""
+    if run.ended_at is None:
+        return "RUNNING"
+    return "PARTIAL" if run.failure_count > 0 else "COMPLETED"
+
+
 def runs_payload(store: DataAccess) -> list[dict]:
-    """Runs for the run selector (most-recent first), with capture/fail counts."""
-    return [
-        {
-            "run_id": r.run_id,
-            "trigger_type": str(r.trigger_type),
-            "started_at": r.started_at.isoformat() if r.started_at else None,
-            "ended_at": r.ended_at.isoformat() if r.ended_at else None,
-            "responses_captured": r.responses_captured,
-            "failure_count": r.failure_count,
-        }
-        for r in store.runs.list()
-    ]
+    """Runs for the run selector + Runs table (most-recent first). Enriched with tokens / cost /
+    questions / a per-run alert count / a derived status — all from existing stored records."""
+    # Per-run alert count: alerts → response → run_id (one pass; read-only).
+    alert_by_run: dict[str, int] = {}
+    for a in store.alerts.list():
+        resp = store.responses.get(a.response_id)
+        if resp is not None:
+            alert_by_run[resp.run_id] = alert_by_run.get(resp.run_id, 0) + 1
+
+    out: list[dict] = []
+    for r in store.runs.list():
+        duration = None
+        if r.ended_at and r.started_at:
+            duration = (r.ended_at - r.started_at).total_seconds()
+        out.append(
+            {
+                "run_id": r.run_id,
+                "trigger_type": str(r.trigger_type),
+                "started_at": r.started_at.isoformat() if r.started_at else None,
+                "ended_at": r.ended_at.isoformat() if r.ended_at else None,
+                "duration_seconds": duration,
+                "questions_attempted": r.questions_attempted,
+                "responses_captured": r.responses_captured,
+                "failure_count": r.failure_count,
+                "total_tokens": r.total_tokens,
+                "est_cost": r.est_cost,
+                "alert_count": alert_by_run.get(r.run_id, 0),
+                "status": _run_status(r),
+            }
+        )
+    return out
 
 
 def _sentiment_rows(by_group: dict) -> list[dict]:
@@ -278,17 +308,132 @@ def dashboard_payload(
     return _dashboard_to_dict(data)
 
 
+def responses_table_payload(
+    store: DataAccess,
+    *,
+    filters: QueryFilters | None = None,
+    llms: set[str] | None = None,
+    search: str | None = None,
+    page: int = 1,
+    page_size: int = 25,
+) -> dict:
+    """Filterable, paginated Responses table (read-only). Reuses ``build_responses_table``."""
+    t = build_responses_table(
+        store, filters=filters, llms=llms, search=search, page=page, page_size=page_size
+    )
+    return {
+        "items": [
+            {
+                "response_id": r.response_id,
+                "timestamp_utc": r.timestamp_utc,
+                "llm_name": r.llm_name,
+                "persona": r.persona,
+                "therapeutic_area": r.therapeutic_area,
+                "domain": r.domain,
+                "status": r.status,
+                "question_id": r.question_id,
+                "question_text": r.question_text,
+                "sentiment": r.sentiment,
+                "competitive_position": r.competitive_position,
+                "citation_status": r.citation_status,
+                "has_alert": r.has_alert,
+            }
+            for r in t.items
+        ],
+        "total": t.total,
+        "page": t.page,
+        "page_size": t.page_size,
+    }
+
+
+def alerts_feed_payload(
+    store: DataAccess,
+    *,
+    rule: str | None = None,
+    persona: str | None = None,
+    llm: str | None = None,
+    severity: int | None = None,
+    date_from=None,
+    page: int = 1,
+    page_size: int = 25,
+) -> dict:
+    """Enriched, filterable, paginated alert feed + global per-type counts (read-only)."""
+    feed = build_alerts_feed(
+        store,
+        rule=rule,
+        persona=persona,
+        llm=llm,
+        severity=severity,
+        date_from=date_from,
+        page=page,
+        page_size=page_size,
+    )
+    return {
+        "counts_by_rule": feed.counts_by_rule,
+        "counts_by_type": feed.counts_by_type,
+        "total": feed.total,
+        "page": page,
+        "page_size": page_size,
+        "items": [
+            {
+                "alert_id": i.alert_id,
+                "response_id": i.response_id,
+                "question_id": i.question_id,
+                "question_text": i.question_text,
+                "model": i.model,
+                "persona": i.persona,
+                "therapeutic_area": i.therapeutic_area,
+                "rule": i.rule,
+                "alert_type": i.alert_type,
+                "severity": i.severity,
+                "reason": i.reason,
+                "sentiment": i.sentiment,
+                "created_at": i.created_at,
+            }
+            for i in feed.items
+        ],
+    }
+
+
+def comparison_payload(store: DataAccess, *, question_id: str, run_id: str) -> dict:
+    """All targets' answers + scores for one (question_id, run_id), for the side-by-side view."""
+    c = build_comparison(store, question_id=question_id, run_id=run_id)
+    return {
+        "question_id": c.question_id,
+        "question_text": c.question_text,
+        "persona": c.persona,
+        "run_id": c.run_id,
+        "columns": [
+            {
+                "response_id": col.response_id,
+                "llm_name": col.llm_name,
+                "status": col.status,
+                "finish_reason": col.finish_reason,
+                "response_text": col.response_text,
+                "block_reason": col.block_reason,
+                "sentiment": col.sentiment,
+                "competitive_position": col.competitive_position,
+                "citation_status": col.citation_status,
+                "scoring_rationale": col.scoring_rationale,
+            }
+            for col in c.columns
+        ],
+    }
+
+
 def _question_to_dict(q) -> dict:
     return {
         "question_id": q.question_id,
         "version": q.version,
         "persona": str(q.persona),
         "therapeutic_area": q.therapeutic_area,
+        "brand_focus": q.brand_focus,
         "domain": str(q.domain),
         "question_text": q.question_text,
         "approval_status": str(q.approval_status),
         "approver_name": q.approver_name,
         "approval_note": q.approval_note,
+        "active": q.active,
         "updated_at": q.updated_at.isoformat() if q.updated_at else None,
     }
 
@@ -370,9 +515,12 @@ def response_payload(store: DataAccess, response_id: str) -> dict:
 
 
 __all__ = [
+    "alerts_feed_payload",
+    "comparison_payload",
     "dashboard_payload",
     "questions_payload",
     "report_payload",
     "response_payload",
+    "responses_table_payload",
     "runs_payload",
 ]

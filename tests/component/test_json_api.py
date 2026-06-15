@@ -269,4 +269,87 @@ def test_api_endpoints_never_write(client):
     assert client.get(f"/api/runs/{rid}/report").status_code == 200
     assert client.get("/api/questions", params={"status": "ALL"}).status_code == 200
     assert client.get("/api/responses/R1").status_code == 200
+    assert client.get("/api/responses").status_code == 200
+    assert client.get("/api/alerts").status_code == 200
+    assert (
+        client.get("/api/comparison", params={"question_id": "Q-1", "run_id": rid}).status_code
+        == 200
+    )
     assert _row_counts(client.store) == before
+
+
+# --------------------------------------------------------------------------- #
+# /api/responses — Stage 3 table feed (filter / search / paginate)
+# --------------------------------------------------------------------------- #
+def test_api_responses_table_lists_and_enriches(client):
+    body = client.get("/api/responses").json()
+    assert body["total"] == 4  # R1..R4
+    rows = {r["response_id"]: r for r in body["items"]}
+    assert rows["R1"]["sentiment"] == 0.8
+    assert rows["R1"]["competitive_position"] == "FIRST_LINE_RECOMMENDED"
+    assert rows["R3"]["has_alert"] is True and rows["R1"]["has_alert"] is False
+    assert rows["R4"]["status"] == "FAILED" and rows["R4"]["sentiment"] is None
+
+
+def test_api_responses_table_multiselect_search_and_status(client):
+    only_a = client.get("/api/responses", params=[("llm", "model-a")]).json()
+    assert {r["response_id"] for r in only_a["items"]} == {"R1", "R3"}
+    failed = client.get("/api/responses", params={"status": "FAILED"}).json()
+    assert {r["response_id"] for r in failed["items"]} == {"R4"}
+    search = client.get("/api/responses", params={"search": "model-b"}).json()
+    assert {r["response_id"] for r in search["items"]} == {"R2", "R4"}
+
+
+def test_api_responses_table_paginates(client):
+    p1 = client.get("/api/responses", params={"page": 1, "page_size": 2}).json()
+    assert p1["total"] == 4 and len(p1["items"]) == 2 and p1["page"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# /api/alerts — Stage 3 enriched feed + global per-type counts (real engine types only)
+# --------------------------------------------------------------------------- #
+def test_api_alerts_feed_counts_and_enrichment(client):
+    body = client.get("/api/alerts").json()
+    assert body["total"] == 1
+    # Counts reflect the REAL engine rule types present (no invented types).
+    assert body["counts_by_rule"] == {"WRONG_INDICATION": 1}
+    assert body["counts_by_type"] == {"wrong-indication": 1}
+    item = body["items"][0]
+    assert item["model"] == "model-a" and item["rule"] == "WRONG_INDICATION"
+    assert item["alert_type"] == "wrong-indication" and item["severity"] == 3
+    assert item["sentiment"] == -0.7 and item["question_id"] == "Q-2"
+
+
+def test_api_alerts_feed_filter_keeps_global_counts(client):
+    body = client.get("/api/alerts", params={"rule": "NEGATIVE_SENTIMENT"}).json()
+    assert body["items"] == []  # no negative-sentiment alert in the fixture
+    assert body["counts_by_rule"] == {"WRONG_INDICATION": 1}  # tiles stay global
+
+
+# --------------------------------------------------------------------------- #
+# /api/comparison — Stage 3 side-by-side
+# --------------------------------------------------------------------------- #
+def test_api_comparison_columns_per_target(client):
+    rid = client.store._run_id
+    body = client.get("/api/comparison", params={"question_id": "Q-1", "run_id": rid}).json()
+    cols = {c["llm_name"]: c for c in body["columns"]}
+    assert set(cols) == {"model-a", "model-b"}
+    assert cols["model-a"]["sentiment"] == 0.8
+    assert cols["model-a"]["response_text"] == "Generic answer body for R1."
+
+
+# --------------------------------------------------------------------------- #
+# Enriched /api/runs + /api/questions (additive fields for the Stage 3 tables)
+# --------------------------------------------------------------------------- #
+def test_api_runs_enriched_fields(client):
+    run = client.get("/api/runs").json()[0]
+    assert run["total_tokens"] == 1234
+    assert run["questions_attempted"] == 2
+    assert run["alert_count"] == 1
+    assert run["status"] == "PARTIAL"  # ended with a failure (failure_count == 1)
+
+
+def test_api_questions_enriched_fields(client):
+    q = client.get("/api/questions", params={"status": "APPROVED"}).json()["questions"][0]
+    assert "brand_focus" in q and "active" in q
+    assert q["active"] is True

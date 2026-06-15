@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { getDashboard, type Dashboard } from "../api";
 import Section from "../components/Section";
 import FilterBar, { type DashFilterState } from "../components/dashboard/FilterBar";
@@ -21,6 +21,8 @@ const INITIAL: DashFilterState = {
 
 export default function DashboardPage() {
   const navigate = useNavigate();
+  const [sp, setSp] = useSearchParams();
+  const runId = sp.get("run_id") ?? undefined;
   const [filters, setFilters] = useState<DashFilterState>(INITIAL);
   const [data, setData] = useState<Dashboard | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -28,13 +30,13 @@ export default function DashboardPage() {
 
   useEffect(() => {
     let live = true;
-    getDashboard(filters)
+    getDashboard({ ...filters, run_id: runId })
       .then((d) => live && setData(d))
       .catch((e) => live && setError(String(e)));
     return () => {
       live = false;
     };
-  }, [filters]);
+  }, [filters, runId]);
 
   if (error) return <p className="mt-6 text-neg-ink">Could not load dashboard: {error}</p>;
 
@@ -48,6 +50,20 @@ export default function DashboardPage() {
 
   return (
     <div>
+      {runId && (
+        <div className="mb-3 flex items-center justify-between rounded-lg border border-brand-line bg-brand-soft px-4 py-2 text-sm">
+          <span className="text-brand-dark">
+            Scoped to run <span className="id font-semibold">{runId.slice(0, 8)}</span>
+          </span>
+          <button
+            type="button"
+            className="font-semibold text-brand hover:text-brand-dark"
+            onClick={() => setSp({}, { replace: true })}
+          >
+            Clear ✕
+          </button>
+        </div>
+      )}
       <FilterBar
         options={data?.options ?? { personas: [], therapeutic_areas: [], llms: [] }}
         targets={data?.targets ?? []}
