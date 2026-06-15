@@ -770,7 +770,14 @@ def build_dashboard(
         failed=status_counts[ResponseStatus.FAILED],
         blocked=status_counts[ResponseStatus.BLOCKED],
     )
-    runs = store.runs.list()
+    # "Last run" must reflect the FILTERED view, not the globally newest run: a scoped run_id names
+    # that run; otherwise it is the most-recent run that actually contributed to the in-view set.
+    runs = store.runs.list()  # most-recent first
+    if filters.run_id:
+        last_run = store.runs.get(filters.run_id)
+    else:
+        in_view_run_ids = {r.run_id for r in responses}
+        last_run = next((run for run in runs if run.run_id in in_view_run_ids), None)
     kpis = DashboardKpis(
         responses_total=metrics.total,
         responses_captured=metrics.captured,
@@ -781,7 +788,7 @@ def build_dashboard(
         positioned=scored,
         favourable=favourable,
         favourable_pct=(favourable / scored if scored else 0.0),
-        last_run=runs[0] if runs else None,
+        last_run=last_run,
     )
 
     present = {r.llm_name for r in responses}
@@ -909,6 +916,44 @@ class ResponsesTable:
     page_size: int
 
 
+def filter_responses(
+    store: DataAccess,
+    *,
+    filters: QueryFilters | None = None,
+    llms: set[str] | None = None,
+    search: str | None = None,
+) -> list[Response]:
+    """The Responses view's filtered row SET (no pagination, no enrichment): ``filters`` at the data
+    layer, then the ``llms`` multi-select and free-text ``search`` as view-layer refinements. The
+    SINGLE definition of "which responses match the Responses view" — shared by the paginated table
+    and the CSV/JSON export so they can never diverge."""
+    filters = filters or QueryFilters()
+    rows = store.responses.query(filters, page_size=None).items
+    if llms:
+        rows = [r for r in rows if r.llm_name in llms]
+    if search:
+        needle = search.strip().lower()
+        q_cache: dict[str, Question | None] = {}
+
+        def _qt(qid: str) -> str:
+            if qid not in q_cache:
+                q_cache[qid] = store.questions.get(qid)
+            q = q_cache[qid]
+            return q.question_text if q is not None else ""
+
+        rows = [
+            r
+            for r in rows
+            if needle in r.question_id.lower()
+            or needle in r.llm_name.lower()
+            or needle in r.therapeutic_area.lower()
+            or needle in str(r.persona).lower()
+            or needle in str(r.status).lower()
+            or needle in _qt(r.question_id).lower()
+        ]
+    return rows
+
+
 def build_responses_table(
     store: DataAccess,
     *,
@@ -918,11 +963,10 @@ def build_responses_table(
     page: int = 1,
     page_size: int = 25,
 ) -> ResponsesTable:
-    """Filterable, paginated Responses table. ``filters`` is applied at the data layer; ``llms``
-    (multi-select) and ``search`` are view-layer refinements (the seam stays single-LLM). Rows are
-    enriched with the latest score summary + question text; only the page slice is enriched."""
-    filters = filters or QueryFilters()
-    rows = store.responses.query(filters, page_size=None).items
+    """Filterable, paginated Responses table. Reuses :func:`filter_responses` for the row set (so
+    the table and the export always agree), then enriches only the page slice with latest score +
+    question text."""
+    rows = filter_responses(store, filters=filters, llms=llms, search=search)
     alert_ids = {a.response_id for a in store.alerts.list()}
     q_cache: dict[str, Question | None] = {}
 
@@ -931,21 +975,6 @@ def build_responses_table(
             q_cache[qid] = store.questions.get(qid)
         q = q_cache[qid]
         return q.question_text if q is not None else ""
-
-    if llms:
-        rows = [r for r in rows if r.llm_name in llms]
-    if search:
-        needle = search.strip().lower()
-        rows = [
-            r
-            for r in rows
-            if needle in r.question_id.lower()
-            or needle in r.llm_name.lower()
-            or needle in r.therapeutic_area.lower()
-            or needle in str(r.persona).lower()
-            or needle in str(r.status).lower()
-            or needle in _qtext(r.question_id).lower()
-        ]
 
     total = len(rows)
     items: list[ResponseRow] = []
@@ -1007,11 +1036,14 @@ def build_alerts_feed(
     page: int = 1,
     page_size: int = 25,
 ) -> AlertsFeed:
-    """Enriched, filterable, paginated alert feed. The per-type COUNTS are global (the real engine
-    rule types over ALL alerts), so the KPI tiles are stable; the feed items honor the filters."""
+    """Enriched, filterable, paginated alert feed.
+
+    The per-type COUNTS (the KPI tiles) are computed over the RESPONSE-SCOPE filters (persona / llm
+    / period) only — NOT the rule/severity drill filters — so the tiles show the breakdown for the
+    current view and reconcile EXACTLY with the dashboard's ``active_alerts`` KPI for the same
+    persona/llm/period. ``rule`` + ``severity`` then narrow the listed items without changing the
+    tiles (so you can click between types). sum(counts_by_rule) == the scope's alert count."""
     alerts = store.alerts.list(order_by_severity=True)
-    counts_by_rule = Counter(str(a.rule_fired) for a in alerts)
-    counts_by_type = Counter(_ALERT_TYPE.get(a.rule_fired, str(a.rule_fired)) for a in alerts)
 
     q_cache: dict[str, Question | None] = {}
 
@@ -1021,7 +1053,8 @@ def build_alerts_feed(
         q = q_cache[qid]
         return q.question_text if q is not None else ""
 
-    enriched: list[AlertFeedItem] = []
+    # Response-scope: the alerts whose response matches persona/llm/period. Tiles count over THIS.
+    scoped: list[tuple[Alert, Response]] = []
     for a in alerts:
         r = store.responses.get(a.response_id)
         if r is None:
@@ -1030,11 +1063,18 @@ def build_alerts_feed(
             continue
         if llm and r.llm_name != llm:
             continue
+        if date_from is not None and r.timestamp_utc < date_from:
+            continue
+        scoped.append((a, r))
+
+    counts_by_rule = Counter(str(a.rule_fired) for a, _ in scoped)
+    counts_by_type = Counter(_ALERT_TYPE.get(a.rule_fired, str(a.rule_fired)) for a, _ in scoped)
+
+    enriched: list[AlertFeedItem] = []
+    for a, r in scoped:
         if rule and str(a.rule_fired) != rule:
             continue
         if severity is not None and a.severity != severity:
-            continue
-        if date_from is not None and r.timestamp_utc < date_from:
             continue
         s = store.scores.latest_for(a.response_id)
         enriched.append(
@@ -1302,6 +1342,7 @@ __all__ = [
     "build_dashboard",
     "build_report",
     "build_responses_table",
+    "filter_responses",
     "latest_per_question",
     "target_metas",
     "render_app",

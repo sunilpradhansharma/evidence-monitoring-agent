@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 
 from evidence_monitor.api import create_app
 from evidence_monitor.config.settings import Settings
-from evidence_monitor.dashboard.render import build_dashboard
+from evidence_monitor.dashboard.render import build_alerts_feed, build_dashboard
 from evidence_monitor.data_access.interface import QueryFilters, RunTotals
 from evidence_monitor.data_access.models import (
     Alert,
@@ -403,3 +403,113 @@ def test_endpoint_is_read_only(client):
     assert client.get("/api/dashboard", params={"period": "30d"}).status_code == 200
     assert client.get("/api/targets").status_code == 200
     assert counts() == before
+
+
+# --------------------------------------------------------------------------- #
+# Correctness-pass regressions (code review #2 / #3 / #4 / #5)
+# --------------------------------------------------------------------------- #
+def test_export_matches_filtered_responses_table(client):
+    # #2: CSV/JSON export must equal the on-screen table for the SAME filters — including a
+    # multi-LLM selection AND a search term (the old export dropped both, returning a superset).
+    params = [("llm", _LLM_A), ("llm", _LLM_B), ("search", "Area-Two")]
+    table = client.get("/api/responses", params=params).json()
+    table_ids = {r["response_id"] for r in table["items"]}
+    export = client.get("/reports/export", params=[*params, ("format", "json")]).json()
+    export_ids = {row["response_id"] for row in export}
+    assert table_ids == export_ids == {"R3", "R4"}  # 2 LLMs + "Area-Two" → exactly these
+
+
+def test_last_run_reflects_scoped_run_not_newest(now, targets):
+    # #3: when a run_id is scoped, "Last run" must describe THAT run, not the globally newest one.
+    s = SqliteStore(":memory:")
+    older = s.runs.create(TriggerType.ADHOC)
+    newer = s.runs.create(TriggerType.ADHOC)  # created after older → globally most-recent
+    s.responses.insert(
+        _resp(
+            "OLD",
+            llm=_LLM_A,
+            persona=Persona.PROSPECT,
+            ta="Area-One",
+            status=ResponseStatus.SUCCESS,
+            ts=now,
+            run_id=older.run_id,
+        )
+    )
+    s.responses.insert(
+        _resp(
+            "NEW",
+            llm=_LLM_A,
+            persona=Persona.PROSPECT,
+            ta="Area-One",
+            status=ResponseStatus.SUCCESS,
+            ts=now,
+            run_id=newer.run_id,
+        )
+    )
+    s.runs.finalize(
+        older.run_id,
+        RunTotals(
+            questions_attempted=1,
+            responses_captured=1,
+            failure_count=0,
+            total_tokens=11,
+            est_cost=0.0,
+        ),
+    )
+    s.runs.finalize(
+        newer.run_id,
+        RunTotals(
+            questions_attempted=1,
+            responses_captured=1,
+            failure_count=0,
+            total_tokens=22,
+            est_cost=0.0,
+        ),
+    )
+    data = build_dashboard(s, filters=QueryFilters(run_id=older.run_id), targets=targets)
+    assert data.kpis.last_run is not None
+    assert data.kpis.last_run.run_id == older.run_id  # the scoped run...
+    assert data.kpis.last_run.run_id != newer.run_id  # ...NOT the newest
+    assert data.kpis.last_run.total_tokens == 11
+    s.close()
+
+
+def test_active_alerts_kpi_matches_alerts_feed_total(store, targets):
+    # #4: an alert on the synthesis target (R5) — the dashboard KPI and the Alerts-page tile total
+    # must reconcile for the same filters (previously the dashboard excluded dev-kind alerts).
+    store.alerts.insert(
+        Alert.for_rule(
+            score_id=store.scores.latest_for("R5").score_id,
+            response_id="R5",
+            rule=AlertRule.NEGATIVE_SENTIMENT,
+            reason="synthesis-target alert",
+        )
+    )
+    # No filters → both count R3 + R5.
+    assert build_dashboard(store, targets=targets).kpis.active_alerts == 2
+    assert sum(build_alerts_feed(store).counts_by_rule.values()) == 2
+
+    # Same persona filter must reconcile both ways.
+    for persona, expected in (("PROVIDER", 2), ("PROSPECT", 0)):
+        dash = build_dashboard(
+            store, filters=QueryFilters(persona=Persona(persona)), targets=targets
+        ).kpis.active_alerts
+        feed = sum(build_alerts_feed(store, persona=persona).counts_by_rule.values())
+        assert dash == feed == expected
+
+
+def test_recent_alerts_dedup_drives_header_count(store, targets):
+    # #5: a SECOND alert on the same response (R3) — active_alerts counts both rows, but the
+    # recent-alerts strip is per-response (length 1). The header must use the strip length.
+    store.alerts.insert(
+        Alert.for_rule(
+            score_id=store.scores.latest_for("R3").score_id,
+            response_id="R3",
+            rule=AlertRule.NEGATIVE_SENTIMENT,
+            reason="second alert on the same response",
+        )
+    )
+    data = build_dashboard(store, targets=targets)
+    assert data.kpis.active_alerts == 2  # two alert rows on R3
+    assert len(data.recent_alerts) == 1  # deduped to one response → this is what the header shows
+    assert len(data.recent_alerts) <= 8  # and the strip is capped

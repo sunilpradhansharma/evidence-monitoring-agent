@@ -54,6 +54,7 @@ from evidence_monitor.dashboard.json_api import (
 from evidence_monitor.dashboard.render import (
     build_approved_questions,
     build_report,
+    filter_responses,
     latest_per_question,
     render_app,
 )
@@ -344,11 +345,24 @@ def _register_reports(app: FastAPI) -> None:
 
     @app.get("/reports/export")
     def export(request: Request, store: StoreDep, format: str = "csv") -> Response:
-        """Export the current filter set to CSV or JSON (FR-025) — matches the on-screen view."""
+        """Export the current filter set to CSV or JSON (FR-025) — matches the on-screen Responses
+        table EXACTLY: it honors the same multi-LLM selection, free-text search, and period the
+        table uses (via the shared ``filter_responses``), so the file equals the filtered view."""
         if format not in ("csv", "json"):
             raise HTTPException(status_code=400, detail="format must be 'csv' or 'json'")
-        filters = _filters_from_params(request.query_params)
-        rows = store.responses.query(filters, page_size=None).items
+        params = request.query_params
+        filters = _filters_from_params(params)
+        # The Responses table sends period (→ date_from) + a multi-LLM selection + search; honor all
+        # three. When a multi-LLM set is present, don't ALSO single-constrain at the SQL layer.
+        period_from = _period_date_from(params.get("period"))
+        if period_from is not None and filters.date_from is None:
+            filters = replace(filters, date_from=period_from)
+        llms = _llms_from_params(params)
+        if llms is not None:
+            filters = replace(filters, llm=None)
+        rows = filter_responses(
+            store, filters=filters, llms=llms, search=params.get("search") or None
+        )
         if format == "json":
             return PlainTextResponse(to_json(rows), media_type="application/json")
         return PlainTextResponse(to_csv(rows), media_type="text/csv")

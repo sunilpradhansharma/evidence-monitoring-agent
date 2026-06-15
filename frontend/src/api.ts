@@ -290,7 +290,8 @@ function responsesParams(q: ResponsesQuery): URLSearchParams {
 export const getResponsesTable = (q: ResponsesQuery) =>
   getJSON<ResponsesTable>(`/api/responses?${responsesParams(q).toString()}`);
 
-// CSV export reuses the existing /reports/export endpoint (period → date_from; single LLM only).
+// CSV/JSON export reuses /reports/export, forwarding EVERY active filter the table uses (multi-LLM
+// selection, free-text search, and period) so the exported file equals the filtered Responses table.
 export function exportUrl(q: ResponsesQuery, format: "csv" | "json" = "csv"): string {
   const p = new URLSearchParams();
   p.set("format", format);
@@ -298,11 +299,9 @@ export function exportUrl(q: ResponsesQuery, format: "csv" | "json" = "csv"): st
   if (q.persona) p.set("persona", q.persona);
   if (q.status) p.set("status", q.status);
   if (q.therapeutic_area) p.set("therapeutic_area", q.therapeutic_area);
-  if (q.llms && q.llms.length === 1) p.set("llm", q.llms[0]);
-  if (q.period === "7d" || q.period === "30d") {
-    const days = q.period === "7d" ? 7 : 30;
-    p.set("date_from", new Date(Date.now() - days * 864e5).toISOString());
-  }
+  if (q.period) p.set("period", q.period);
+  if (q.search) p.set("search", q.search);
+  (q.llms ?? []).forEach((l) => p.append("llm", l));
   return `/reports/export?${p.toString()}`;
 }
 

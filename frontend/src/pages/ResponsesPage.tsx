@@ -28,12 +28,13 @@ export default function ResponsesPage() {
   const [open, setOpen] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Filters (heatmap drill-through pre-seeds persona / llm / therapy from the query string).
+  // Filters (heatmap drill-through pre-seeds persona / llm / therapy / period / run from the URL so
+  // the drilled set reconciles with the cell it came from).
   const [persona, setPersona] = useState(sp.get("persona") ?? "");
   const [therapy, setTherapy] = useState(sp.get("therapeutic_area") ?? "");
   const [status, setStatus] = useState("");
-  const [period, setPeriod] = useState("all");
-  const [runId, setRunId] = useState("");
+  const [period, setPeriod] = useState(sp.get("period") ?? "all");
+  const [runId, setRunId] = useState(sp.get("run_id") ?? "");
   const [llms, setLlms] = useState<string[]>(sp.get("llm") ? [sp.get("llm") as string] : []);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);

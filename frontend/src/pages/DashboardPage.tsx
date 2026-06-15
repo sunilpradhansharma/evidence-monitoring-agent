@@ -40,8 +40,12 @@ export default function DashboardPage() {
   if (error) return <p className="mt-6 text-neg-ink">Could not load dashboard: {error}</p>;
 
   const drillToResponses = (targetId: string, therapeuticArea: string) => {
+    // Carry the FULL active scope so the drilled Responses set reconciles with the cell's count:
+    // persona, the period window, and the scoped run (the target + therapy come from the cell).
     const p = new URLSearchParams();
     if (filters.persona) p.set("persona", filters.persona);
+    if (filters.period && filters.period !== "all") p.set("period", filters.period);
+    if (runId) p.set("run_id", runId);
     p.set("llm", targetId);
     p.set("therapeutic_area", therapeuticArea);
     navigate(`/responses?${p.toString()}`);
@@ -113,8 +117,8 @@ export default function DashboardPage() {
           </div>
 
           <Section
-            title={`Recent alerts (${data.kpis.active_alerts})`}
-            note="Latest flagged responses. Click one to read the full response and rationale."
+            title={`Recent alerts (${data.recent_alerts.length})`}
+            note="Latest flagged responses (newest first). Click one to read the full response and rationale."
           >
             <RecentAlerts alerts={data.recent_alerts} onOpen={setOpenResponse} />
           </Section>
