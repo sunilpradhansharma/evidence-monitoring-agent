@@ -30,11 +30,12 @@ FastAPI process (ADR-0008).
   status of `SUCCESS / FAILED / TRUNCATED / BLOCKED` and full metadata; records are queryable.
 - **Scoring + Alerts** — Claude produces a structured score per response; deterministic code
   decides which responses raise an alert.
-- **React dashboard + read-only `/api`** — a Vite/TypeScript/Tailwind single-page app served by
-  FastAPI at one local URL: read-only Reports for stakeholders (run selector, coverage heatmap,
-  sentiment chart, citation panel, alerts) over `/api/*` JSON endpoints that reuse the existing
-  aggregation, plus read-write **Approvals** for Medical Affairs. The legacy server-rendered UI is
-  retained at `/html`.
+- **React dashboard + read-only `/api`** — a Vite/TypeScript/Tailwind multi-page single-page app
+  served by FastAPI at one local URL. A persistent left-nav shell has **six sections** — Dashboard,
+  Responses, Alerts, LLM Comparison, Question Repository, Runs — over read-only `/api/*` JSON
+  endpoints that reuse the existing `render.py` aggregation (no new aggregation, no new write paths).
+  Medical Affairs **Approvals** (the only writes) live under Question Repository. The legacy
+  server-rendered UI is retained at `/html`.
 - **Scheduling + Audit** — a daily run on a cron/scheduler, plus an append-only audit log of every
   query and response for compliance.
 
@@ -46,15 +47,15 @@ FastAPI process (ADR-0008).
 - **3 public LLMs** — OpenAI GPT-4o, Google Gemini, and Anthropic Claude (queried as an end-user).
   Model ids come from config (`src/evidence_monitor/config/targets.yaml`): `gpt-4o-2024-08-06`,
   `gemini-2.5-flash`, `claude-sonnet-4-6`.
-- **Provider-persona Provider-evidence targets:**
-  - **Provider evidence (dev)** — a **development stand-in** that exercises the Provider pipeline
-    via public **PubMed** (E-utilities) retrieval + **Claude synthesis** of the retrieved abstracts.
-    It is **NOT Open Evidence**, its output is not Open Evidence's and will differ, and it must never
-    be reported as Open Evidence. Provider-persona only; enabled in the current config. See
-    [ADR-0011](docs/adr/0011-provider-evidence-dev-target.md).
-  - **Open Evidence** — the real conditional Provider target, **inactive / not yet built** (its
-    production API needs a key + org id + signed BAA via their sales process, plus Legal/ToS
-    sign-off). Its absence does not count against the capture rate.
+- **Provider-persona evidence targets:**
+  - **Synthesized Evidence** — a first-class **literature-synthesis** target (config `kind:
+    synthesis`) that queries public **PubMed** (E-utilities) and uses **Claude** to write a
+    PMID-cited answer from the retrieved abstracts. It is named for *what it does*; it is **not**
+    attributed to any third-party product and uses **no Open Evidence data**. Provider-persona only;
+    active in the current config. See [ADR-0014](docs/adr/0014-synthesized-evidence-target.md).
+  - **Open Evidence** — the real commercial Provider API (config `kind: provider-api`), present but
+    **inactive / not yet built**; the integration remains a future task. Its absence does not count
+    against the capture rate.
 - The **162-question bank** (Patient 59 · Prospect 49 · Provider 54; across Immunology,
   Neuroscience, and Oncology).
 - **Local execution** — SQLite/DuckDB storage; a React dashboard served by FastAPI at
@@ -353,7 +354,7 @@ For each response, Claude returns a structured object (validated against a JSON 
 │   ├── SRS.pdf                   # Software Requirements Specification (source of scope)
 │   ├── technical-architecture.md # Architecture, invariants, data model, ADR index, prod swap
 │   ├── project-status.md         # LIVING status: phases, decisions, open items, how to resume
-│   ├── adr/                      # Architecture Decision Records (0001–0010)
+│   ├── adr/                      # Architecture Decision Records (0001–0014)
 │   └── diagrams/                 # System, pipeline, orchestrator, ERD, sequence, etc.
 ├── specs/001-evidence-monitoring-poc/
 │   ├── spec.md  plan.md  research.md  data-model.md  tasks.md  quickstart.md
@@ -416,7 +417,7 @@ self-contained dashboard plus CSV/JSON exports are produced.
 **Live:** put `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY` (and optional
 `OPEN_EVIDENCE_API_KEY`) in `.env`, approve questions in the Approvals UI, then:
 ```bash
-uv run uvicorn evidence_monitor.api:app     # Reports + Approvals UI
+uv run uvicorn evidence_monitor.api:app     # the React dashboard (six sections) + Approvals
 uv run evidence-monitor run                 # a live run over APPROVED questions
 ```
 
@@ -445,13 +446,14 @@ through the secret-redacting formatter, so a credential can never reach a log si
 The `approve`/`reject`/`approve-all-test-numbered`/`reset-to-pending` commands all go through the
 question-repository approval seam and append to the append-only audit log — never raw SQL.
 
-### Run the "Provider evidence (dev)" target
+### Run the "Synthesized Evidence" target
 
-`provider-evidence-dev` is the development stand-in for the future Open Evidence Provider target
-(PubMed retrieval + Claude synthesis). It is **NOT Open Evidence** and its output will differ —
-never report it as Open Evidence. It is **Provider-persona only** and, in the current committed
-config, `active: true` (set `active: false` in `targets.yaml` to disable it). It makes live network
-calls (PubMed E-utilities + Claude), so it needs `ANTHROPIC_API_KEY`; NCBI asks callers to identify
+`provider-evidence-dev` (display name **"Synthesized Evidence"**, config `kind: synthesis`) is a
+first-class literature-synthesis target: PubMed (E-utilities) retrieval + Claude synthesis of the
+retrieved abstracts. It is named for what it does and is **not** attributed to any third-party
+product (it uses no Open Evidence data). It is **Provider-persona only** and `active: true` in the
+committed config (set `active: false` in `targets.yaml` to disable it). It makes live network calls
+(PubMed E-utilities + Claude), so it needs `ANTHROPIC_API_KEY`; NCBI asks callers to identify
 themselves, so optionally set `EM_NCBI_EMAIL` (and `NCBI_API_KEY` for higher rate limits).
 
 ```bash
@@ -481,7 +483,7 @@ both worked for that target (a `[FAILED] … — <ErrorClass>` line shows the no
 `ANTHROPIC_API_KEY` first — once it works, the `openai-gpt4o` / `google-gemini` smoke tests both
 capture and score.
 
-### Dashboard (React SPA + Approvals)
+### Dashboard (React SPA)
 
 **Build once, then serve — one URL, one process:**
 
@@ -501,18 +503,42 @@ uv run uvicorn evidence_monitor.api:app                # terminal 1 (backend, po
 cd frontend && npm run dev                             # terminal 2 → http://127.0.0.1:5173
 ```
 
-- **Reports** (client route `/`) — run selector (defaults to the latest run), headline, metric
-  cards, the question × model coverage heatmap, a sentiment chart, the citation-status panel,
-  competitive positioning, and the alerts list. Click a coverage cell or alert to open the full
-  response + scoring rationale. Backed by read-only `GET /api/runs`, `GET /api/runs/{id}/report`,
-  and `GET /api/responses/{id}`.
-- **Approvals** (client route `/approvals`) — the **only** writes. A reviewer-name field (Approve/
-  Reject disabled until filled), the PENDING queue grouped by persona, and read-only Approved/
-  Rejected tables (version-aware: each question appears once). Reads `GET /api/questions`; writes go
-  through the existing audited `POST /approvals/questions/{id}/approve|reject|edit`.
-- **Endpoints:** read-only JSON under `/api/*` and `/reports/*` (incl. `GET /reports/export` for
-  CSV/JSON); writes only under `/approvals/*`; `/health` for the credential preflight; the legacy
-  server-rendered UI at `/html`.
+A persistent left-nav shell (groups **INSIGHTS** / **MANAGE**) has **six sections**. The top bar
+shows the current reviewer name and a sign-out placeholder — **there is no real auth in the POC**
+(the name is just recorded on approve/reject actions); a run-status chip shows whether a run is in
+progress or how long ago the last one finished.
+
+- **Dashboard** (`/`) — a filter bar (persona / target multi-select / therapy area / period
+  7d·30d·All), **five KPI cards** (responses captured + success rate, average sentiment, active
+  alerts, favourable-positioning %, last run), a **sentiment-distribution histogram by LLM**,
+  **competitive-positioning stacked bars** (% share per target), a **sentiment heatmap** of
+  LLM × therapy area (green→red; click a cell to drill into Responses), **volume-over-time** stacked
+  by status, and a **recent-alerts** strip. Backed by `GET /api/dashboard` (and `/api/targets` for
+  labels). Clicking a run on the Runs page scopes the whole Dashboard to that run.
+- **Responses** (`/responses`) — a filterable, paginated table (captured time, target, persona,
+  question, sentiment, position, status) with search + filters (persona / target multi-select /
+  status / period / run) and **CSV export that matches the on-screen filtered view**. Click a row
+  for the full response + scoring rationale. Backed by `GET /api/responses` and `GET /reports/export`.
+- **Alerts** (`/alerts`) — KPI tiles **per alert type the engine actually produces** (the four real
+  rules; nothing invented) plus a filterable, paginated alert feed (severity, type, target, persona,
+  therapy, question, sentiment, time). The Dashboard "active alerts" count and this page reconcile
+  for the same filters. Backed by `GET /api/alerts`.
+- **LLM Comparison** (`/comparison`) — pick an approved question and a run; see each target's full
+  answer side by side with its score. A Provider-only target with no answer for a question is shown
+  as an explicit "no response", never a misleading blank. Backed by `GET /api/comparison`.
+- **Question Repository** (`/questions`) — the version-aware questions table (latest version per
+  `question_id`) with filters and an **Import CSV** affordance (which surfaces the CLI import
+  command); an **Add-question** authoring form is **not built** (a disabled "coming soon"). The
+  Medical Affairs **Approvals** flow (the only writes — reviewer-name-gated approve/reject, audited)
+  lives here as a sub-tab. Backed by `GET /api/questions`; writes via `POST /approvals/questions/{id}/…`.
+- **Runs** (`/runs`) — run history (id, started, duration, captured, alerts, tokens, est. cost,
+  status RUNNING/PARTIAL/COMPLETED, ad-hoc vs scheduled). Click a run to open the run-scoped
+  Dashboard. Backed by `GET /api/runs`.
+
+**Endpoints:** read-only JSON under `/api/*` (`/api/dashboard`, `/api/responses`, `/api/alerts`,
+`/api/comparison`, `/api/targets`, `/api/runs`, `/api/runs/{id}/report`, `/api/questions`,
+`/api/responses/{id}`) and `/reports/*` (incl. `GET /reports/export` for CSV/JSON); writes only under
+`/approvals/*`; `/health` for the credential preflight; the legacy server-rendered UI at `/html`.
 
 ## Roadmap
 
@@ -521,15 +547,38 @@ cd frontend && npm run dev                             # terminal 2 → http://1
   capture. Next is the POC readout / acceptance validation.
 - **Acceptance:** a 7-day unattended run with zero interventions, ≥95% capture, and a dashboard
   stakeholders confirm is actionable.
-- **Real Open Evidence integration (pending, not built):** replace the `provider-evidence-dev`
-  stand-in with the real Open Evidence Provider adapter (their `createAnalysisStreaming` API), which
-  requires an API key + org id + a signed BAA via their sales process, plus Legal/ToS sign-off. It
-  slots in behind the existing `llm` adapter seam (a new adapter + a config flip), with no change to
-  core orchestration.
+- **Real Open Evidence integration (pending, not built):** the real Open Evidence Provider API
+  (config `kind: provider-api`, currently `active: false`) remains a future task — it needs an API
+  key + org id + a signed BAA plus Legal/ToS sign-off, and slots in behind the existing `llm` adapter
+  seam (a new adapter + a config flip) with no change to core orchestration. It is distinct from the
+  Synthesized Evidence target, which is its own first-class literature-synthesis target.
 - **Production (future):** SQLite → Aurora/DynamoDB, Anthropic API → Bedrock, local scheduler →
   EventBridge, behind the same seams.
 - **Vision (future, not POC):** GEO analysis, multi-agent architecture, literature-mining,
   pharmacovigilance signal detection.
+
+## POC scope vs. production
+
+This is a **proof of concept**, deliberately scoped. What that means in practice:
+
+- **Local-first, no auth.** The app binds to `127.0.0.1` with **no authentication, SSO, or RBAC**;
+  the reviewer "name" is a typed attribution field, not a login. Real deployment needs IT/Security to
+  add auth and hosting.
+- **Built & working:** the 3-LLM capture pipeline, scoring, the **four** deterministic alert rules
+  (incl. `WRONG_INDICATION`), version-aware counts, the multi-page React dashboard (all six
+  sections), the read-only `/api` layer, the **Synthesized Evidence** literature target, the
+  approval workflow, and the append-only audit log.
+- **Not built / deferred (honest list):** the real **Open Evidence** API integration; the in-UI
+  **Add-question** authoring form (a disabled "coming soon"; import is via CLI); the **expanded
+  alert-rule set** some designs imply (e.g. material-change / clinical-accuracy / baseline-drift) —
+  **only the four real rules exist**; run-over-run **change detection**; repeated (3×) submission per
+  question; human **score override** (the endpoint is scaffolded but off); and **performance/scale
+  hardening** (some read paths are N+1 / load-everything — fine at POC size, flagged for production).
+- **Production swap (future):** SQLite → Aurora/DynamoDB, Anthropic API → Bedrock, local scheduler →
+  EventBridge, SPA → S3/CloudFront — all behind the `llm` and `data_access` seams (Constitution X).
+
+The **living, candid status** — built vs pending vs the human gates required for a real deployment
+— is **[docs/project-status.md](docs/project-status.md)**.
 
 ## Data & compliance note
 

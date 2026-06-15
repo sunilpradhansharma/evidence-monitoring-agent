@@ -1,6 +1,13 @@
 # ADR-0011: A labeled PubMed+Claude "Provider evidence (dev)" stand-in — explicitly NOT Open Evidence
 
-**Status:** Accepted (2026-06-14)
+**Status:** Superseded by [ADR-0014](0014-synthesized-evidence-target.md) (2026-06-14).
+
+> **Superseded.** The same PubMed+Claude target (id `provider-evidence-dev`) was **renamed to
+> "Synthesized Evidence"** and reframed as a **first-class literature-synthesis target** (config
+> `kind: synthesis`) rather than a "dev stand-in"; it is named for what it does and is not framed in
+> relation to any third-party product. The mechanism (PubMed E-utilities + Claude synthesis,
+> Provider-persona only, PMID provenance, graceful failure) is unchanged. See ADR-0014 for the
+> current decision; the context below is retained for history.
 
 ## Context
 

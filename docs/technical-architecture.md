@@ -59,10 +59,13 @@ Full records in [`docs/adr/`](adr/):
 | [0005](adr/0005-combined-local-ui.md) | Combined Reports + Approvals UI, local-only, approver-name, no RBAC *(UI-rendering portion superseded by ADR-0008)* |
 | [0006](adr/0006-citation-status-wrong-indication.md) | `citation_status` with `WRONG_INDICATION` + highest-severity alert |
 | [0007](adr/0007-offline-e2e-capture-rate-and-cli-preflight.md) | Offline e2e capture-rate gate + CLI credential preflight |
-| [0008](adr/0008-react-spa-over-fastapi-readonly-api.md) | React SPA primary UI, served by FastAPI over a read-only `/api` layer reusing `render.py` |
+| [0008](adr/0008-react-spa-over-fastapi-readonly-api.md) | React SPA primary UI, served by FastAPI over a read-only `/api` layer reusing `render.py` *(extended by ADR-0012)* |
 | [0009](adr/0009-version-aware-question-counts.md) | Version-aware question counts (latest version per `question_id`) |
 | [0010](adr/0010-gemini-thinking-disabled.md) | Disable Gemini "thinking" + pin a current model id (config + adapter) |
-| [0011](adr/0011-provider-evidence-dev-target.md) | Labeled PubMed+Claude "Provider evidence (dev)" stand-in — explicitly NOT Open Evidence |
+| [0011](adr/0011-provider-evidence-dev-target.md) | Labeled PubMed+Claude "Provider evidence (dev)" stand-in *(superseded by ADR-0014)* |
+| [0012](adr/0012-multi-page-dashboard.md) | Multi-page React dashboard (six-section nav shell) over expanded read-only `/api` endpoints |
+| [0013](adr/0013-explicit-target-kind.md) | Explicit target `kind` config field (replaces the persona-count heuristic) |
+| [0014](adr/0014-synthesized-evidence-target.md) | "Synthesized Evidence" — a first-class literature-synthesis target (PubMed + Claude) |
 
 ## 4. Module / package map
 
@@ -75,7 +78,7 @@ src/evidence_monitor/
 ├── llm/            client.py (Claude orchestrator + scorer; model id from config)  ← the LLM seam
 │                   adapters/ base.py (retry/backoff, rate limit, mock), openai_gpt4o.py,
 │                            gemini.py (safety→BLOCKED), claude_target.py, open_evidence.py,
-│                            provider_evidence_dev.py (PubMed + Claude synthesis dev stand-in)
+│                            provider_evidence_dev.py ("Synthesized Evidence": PubMed + Claude synthesis)
 │                   registry.py (config→adapter wiring + persona/active gating)
 ├── question_repo/  repository.py (CRUD + versioning), approval.py (gate), importer.py (CSV/Excel), seed.py
 ├── response_repo/  repository.py (immutable writes), schema.py (Response record)
@@ -113,37 +116,62 @@ SQLite implementation can be replaced by an Aurora/DynamoDB one without touching
 The seam is where immutability, versioning, append-only audit, and soft-delete/retention are
 **enforced**, not merely encouraged.
 
-## 5a. Web layer — React SPA + FastAPI + read-only `/api` (ADR-0008)
+## 5a. Web layer — multi-page React SPA + FastAPI + read-only `/api` (ADR-0008, ADR-0012)
 
 One FastAPI app (`api.py`) is the whole web layer; there is no separate backend service.
 
-- **React SPA (primary UI).** `frontend/` is a Vite + TypeScript + Tailwind app (Recharts for the
-  sentiment chart, Figtree base font via `@fontsource/figtree`). `npm run build` emits static files to
-  `frontend/dist/`. FastAPI serves them: hashed assets at `/assets`, and `index.html` at `/` and as
-  the fallback for unknown client-side routes (registered **last** so it never shadows an API/HTML
-  route). With no build present, `/` serves the legacy HTML instead, so the suite and a fresh
-  checkout still work without Node.
-- **Read-only `/api` layer.** `dashboard/json_api.py` serializes exactly what `render.py` already
-  computes — **no new aggregation**:
-  - `GET /api/runs` — runs for the selector (id, timestamps, captured/fail counts).
-  - `GET /api/runs/{run_id}/report` — the full Reports payload for one run: headline, run metrics
-    (responses/success/truncated/failed/blocked, capture rate vs ≥95%, alerts + by-type, scope,
-    cost, tokens, duration), the question × model coverage matrix (per-cell status class, label,
-    `truncated`, `response_id`), sentiment-by-model and -therapy, citation counts, the positioning
-    table, and the alerts list. Counts are version-aware and run-scoped exactly as the HTML view.
+- **React SPA (primary UI).** `frontend/` is a Vite + TypeScript + Tailwind app (Recharts; Figtree
+  base font via `@fontsource/figtree`). `npm run build` emits static files to `frontend/dist/`.
+  FastAPI serves them: hashed assets at `/assets`, and `index.html` at `/` and as the fallback for
+  unknown client-side routes (registered **last** so it never shadows an API/HTML route). With no
+  build present, `/` serves the legacy HTML instead, so the suite and a fresh checkout still work
+  without Node.
+- **Six-section nav shell (ADR-0012).** A persistent left sidebar (groups **INSIGHTS** / **MANAGE**)
+  with client-side routes: **Dashboard** (`/`), **Responses** (`/responses`), **Alerts** (`/alerts`),
+  **LLM Comparison** (`/comparison`), **Question Repository** (`/questions`), **Runs** (`/runs`). The
+  top bar shows the current reviewer name + a **sign-out placeholder — there is no real auth** (the
+  name is only recorded on approve/reject); a run-status chip shows run-in-progress vs last-run age.
+  Approvals (the only writes) live as a sub-tab under Question Repository.
+- **Read-only `/api` layer.** `dashboard/json_api.py` serializes exactly what `render.py` computes —
+  **no new aggregation, no new write paths**:
+  - `GET /api/dashboard` — the Dashboard aggregate honoring the filter bar (persona / target
+    multi-select / therapy / period / scoped run): five KPI values (responses + success rate, avg
+    sentiment, active alerts, favourable-positioning %, last run), the sentiment-distribution
+    histogram per target, competitive-positioning shares per target, mean sentiment by
+    (target × therapy area) for the heatmap, volume-per-week-by-status, and recent alerts. The
+    **"last run" KPI honors the active filters / scoped run** (not the globally newest run).
+  - `GET /api/targets` — every configured target with its config-sourced `kind` + `display_name`
+    (and `active`). The **frontend's single source of truth** for labeling/classifying a target by
+    name (no slug or label is hard-coded client-side).
+  - `GET /api/responses` — the filterable, paginated Responses table (server filters: run / persona
+    / status / therapy / period; target multi-select + free-text search applied in the view layer).
+  - `GET /api/alerts` — the enriched, filterable, paginated alert feed plus per-type counts; the
+    counts are scoped to the persona/target/period filters so the **dashboard "active alerts" KPI and
+    this page reconcile** for the same filters.
+  - `GET /api/comparison?question_id=&run_id=` — every target's full answer + score for one
+    (question, run), for the side-by-side view.
+  - `GET /api/runs` — runs for the selector and the Runs table (timings, captured/fail, tokens,
+    est. cost, per-run alert count, derived status RUNNING/PARTIAL/COMPLETED).
+  - `GET /api/runs/{run_id}/report` — the full single-run Reports payload (`build_report`): headline,
+    run metrics, the question × model coverage matrix, sentiment-by-model/-therapy, citation counts,
+    positioning, and alerts. Counts are version-aware and run-scoped. (Also backs the legacy `/html`.)
   - `GET /api/questions?status=&persona=` — version-aware questions (latest per `question_id`) plus
     global status counts (pending/approved/rejected/total).
   - `GET /api/responses/{response_id}` — full response text + scoring rationale for click-through.
 - **Legacy/JSON Reports endpoints retained.** `GET /reports/responses`, `/reports/responses/{id}`,
   `/reports/alerts`, `/reports/export` (CSV/JSON), `/reports/runs/{id}/summary`, and the legacy HTML
-  at `/html`.
+  at `/html`. **`/reports/export` honors the same multi-target selection, search, and period the
+  Responses table uses** (via a shared `render.filter_responses`), so an export equals the on-screen
+  filtered view.
 - **The only writes** remain `POST /approvals/questions/{id}/approve|reject|edit` — audit-logged,
   through the question-repo approval seam. The SPA calls these directly; no write path was added.
   (`POST /score-review/{id}` exists but is disabled in this build and returns 404.)
-- **Data flow (read).** SPA → `GET /api/runs` (default to latest) → `GET /api/runs/{id}/report` →
-  render; a coverage cell or alert opens `GET /api/responses/{id}` in a side panel. **Data flow
-  (write).** Approvals tab → `POST /approvals/.../approve|reject` (reviewer name required) → the
-  approval seam writes a new question version + an audit entry → the SPA re-fetches `/api/questions`.
+- **Data flow (read).** SPA loads `GET /api/targets` once (labels), then each page calls its endpoint
+  (`/api/dashboard`, `/api/responses`, `/api/alerts`, `/api/comparison`, `/api/runs`,
+  `/api/questions`); a row/cell/alert opens `GET /api/responses/{id}` in a side panel; a heatmap cell
+  drills to Responses carrying the active filters. **Data flow (write).** Approvals sub-tab →
+  `POST /approvals/.../approve|reject` (reviewer name required) → the approval seam writes a new
+  question version + an audit entry → the SPA re-fetches `/api/questions`.
 
 ## 6. Data model
 
@@ -153,7 +181,7 @@ Mirrors `docs/diagrams/evidence_monitor_detailed_erd.html` and
 | Entity | Role | Key fields | Relationships |
 |--------|------|-----------|---------------|
 | **Question** | curated, versioned, approved item | `question_id`, `version`, `persona`, `therapeutic_area`, `brand_focus`, `domain`, `active`, `approval_status`, `approver_name` | 1→* Response |
-| **LLM_Target** | a configured public model | `target_id`, `llm_name`, `model_version`, params, `rpm/tpm_limit`, `personas`, `tos_acknowledged` | 1→* Response |
+| **LLM_Target** | a configured monitored target | `target_id`, `llm_name`, `model_version`, `kind` (`llm`/`synthesis`/`provider-api`), `display_name`, params, `rpm/tpm_limit`, `personas`, `active`, `tos_acknowledged` | 1→* Response |
 | **Run** | a scheduled/ad-hoc batch | `run_id`, `trigger_type`, timings, counts, tokens, cost, `last_completed_question_id` | 1→* Response, AuditLog |
 | **Response** *(immutable)* | one target's answer to one question | `response_id`, FKs, `response_text` (full), `status` (SUCCESS/FAILED/TRUNCATED/BLOCKED), `finish_reason`, `block_reason` | *→1 Question/Target/Run |
 | **Scoring_Record** *(versioned)* | derived score for a response | `score_id`, `response_id`, `version`, `sentiment_score`, `competitive_position`, **`citation_status`**, `brand_mentions`, `key_claims`, `scoring_rationale`, `scorer_model` | *→1 Response |
@@ -193,19 +221,33 @@ monitored Claude *target* is a separate adapter queried as an end-user; calls ar
 `ORCHESTRATOR` vs `TARGET` in the audit log.
 
 **Active targets (from `config/targets.yaml`):** `openai-gpt4o` → `gpt-4o-2024-08-06`,
-`google-gemini` → `gemini-2.5-flash`, `anthropic-claude-target` → `claude-sonnet-4-6`, and the
-Provider-only dev stand-in `provider-evidence-dev` (`active: true` in the committed config). The real
-`open-evidence` target is present but `active: false`.
+`google-gemini` → `gemini-2.5-flash`, `anthropic-claude-target` → `claude-sonnet-4-6` (all
+`kind: llm`), and the Provider-only **Synthesized Evidence** target `provider-evidence-dev`
+(`kind: synthesis`, `active: true`). The real `open-evidence` target (`kind: provider-api`) is
+present but `active: false`.
 
-### The adapter seam — worked example: `provider-evidence-dev`
+### Explicit target `kind` classification (ADR-0013)
+
+Each target carries an explicit **`kind`** in config — `llm` (a general-purpose public LLM),
+`synthesis` (a literature-synthesis target), or `provider-api` (a real commercial clinical provider
+API). `kind` drives how the dashboard classifies, orders, and labels each target (`render.target_metas`
+reads `kind` + `display_name` straight from config). This **replaced an earlier persona-count
+heuristic** that inferred "general LLM vs limited target" from how many personas a target served —
+fragile, because a real provider-only product (e.g. Open Evidence) would have been mislabeled. The
+classification is now an explicit config fact, and all kinds are first-class in the dashboard (no
+kind is hidden by default). The frontend reads `kind`/`display_name` from `GET /api/targets` as its
+**single source of truth** — no target slug or label is hard-coded client-side.
+
+### The adapter seam — worked example: Synthesized Evidence (`provider-evidence-dev`)
 
 Adding a target is a new adapter class + a `targets.yaml` entry + a registry mapping — the
-orchestrator never changes. `provider-evidence-dev` (ADR-0011) is the worked example. It is a
-**development stand-in** for the future Open Evidence Provider target — explicitly **NOT Open
-Evidence** and never reported as such — and it shows the seam handling a *composite* provider:
+orchestrator never changes. **Synthesized Evidence** (id `provider-evidence-dev`, `kind: synthesis`,
+ADR-0014) is the worked example: a first-class **literature-synthesis** target — named for *what it
+does*, not attributed to any third-party product (it uses no Open Evidence data) — that shows the
+seam handling a *composite* provider:
 
-1. Its `_call_live` queries public **PubMed E-utilities** (`esearch` → `efetch`) for the question
-   (NCBI `tool`/`email` from config; optional `api_key`), then
+1. It queries public **PubMed E-utilities** (`esearch` → `efetch`) for the question (NCBI
+   `tool`/`email` from config; optional `api_key`), then
 2. calls the existing **Claude client** (orchestrator role) to synthesize a cited answer **from the
    retrieved abstracts only**.
 
@@ -214,11 +256,11 @@ response — recorded immutably and scored by the normal pipeline. It inherits t
 retry/backoff and offline-mock behaviour, and a PubMed outage degrades to `FAILED` so the run
 continues. It is Provider-persona only and gated by the same `active`/persona rule as every target.
 
-**Where the real Open Evidence adapter slots in:** a future `open_evidence.py` adapter implementing
-the same protocol (their `createAnalysisStreaming` API — needs API key + org id + signed BAA + Legal/
-ToS sign-off) drops into this seam; activating it (and retiring/deactivating the dev stand-in) is a
-config + adapter change, no core change. Its credentials already have config slots
-(`OPENEVIDENCE_API_KEY`, `OPENEVIDENCE_ORG_ID`), required only when that target is `active`.
+**Where the real Open Evidence adapter slots in:** the real `open-evidence` target (`kind:
+provider-api`, `active: false`) remains a future task — its adapter would implement the same protocol
+and drop into this seam, a config + adapter change with no core change. It is distinct from
+Synthesized Evidence. (Credential slots `OPENEVIDENCE_API_KEY` / `OPENEVIDENCE_ORG_ID` exist, required
+only when that target is `active`.)
 
 ## 9. Scoring + the four alert rules
 

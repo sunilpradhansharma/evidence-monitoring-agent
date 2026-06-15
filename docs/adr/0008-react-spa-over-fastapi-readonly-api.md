@@ -1,6 +1,13 @@
 # ADR-0008: React SPA as the primary UI, served by FastAPI over a read-only `/api` layer
 
-**Status:** Accepted (2026-06-14)
+**Status:** Accepted (2026-06-14) — **extended by [ADR-0012](0012-multi-page-dashboard.md)**.
+
+> **Note (current state):** this ADR records the original two-route **Reports + Approvals** SPA.
+> That SPA was later expanded into a **six-section** nav shell (Dashboard, Responses, Alerts, LLM
+> Comparison, Question Repository, Runs) over additional read-only `/api` endpoints — see ADR-0012.
+> The base font is now **Figtree** (not Inter as written below). The foundational decisions here —
+> a React SPA served by FastAPI at `/`, read-only `/api` reusing `render.py`, writes only on the
+> audited approval endpoints, legacy HTML retained at `/html` — remain in force.
 
 ## Context
 
