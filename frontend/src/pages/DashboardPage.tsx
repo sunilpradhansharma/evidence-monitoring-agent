@@ -15,7 +15,6 @@ const INITIAL: DashFilterState = {
   persona: "",
   therapeutic_area: "",
   period: "all",
-  include_dev: false,
   llms: [],
 };
 
@@ -71,13 +70,6 @@ export default function DashboardPage() {
         onChange={setFilters}
       />
 
-      {filters.include_dev && (
-        <p className="mt-2 text-xs text-ink-soft">
-          Provider evidence (dev) is folded into the figures below — a small-sample PubMed+Claude
-          stand-in, shown distinctly so it does not skew the LLM comparison.
-        </p>
-      )}
-
       {!data ? (
         <p className="mt-6 text-ink-soft">Loading dashboard…</p>
       ) : (
@@ -92,7 +84,7 @@ export default function DashboardPage() {
               note="How sentiment toward the therapy spreads across the −1…+1 scale, one series per model."
               className="!mt-0"
             >
-              <SentimentHistogram histogram={data.sentiment_histogram} targets={data.targets} />
+              <SentimentHistogram histogram={data.sentiment_histogram} />
             </Section>
 
             <Section

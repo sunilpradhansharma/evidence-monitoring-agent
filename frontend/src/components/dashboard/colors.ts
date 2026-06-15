@@ -1,13 +1,11 @@
 // Chart palette derived from the clinical tokens in tailwind.config.js. Limited/dev targets get a
 // muted gray so they never read as a strong LLM signal in the comparison.
 
-const LLM_PALETTE = ["#185FA5", "#0E7C86", "#5B6BB5", "#1F8A5B", "#9B5FA8"];
-const DEV_COLOR = "#8A95A3"; // ink.faint — visibly "lesser/limited"
+const SERIES_PALETTE = ["#185FA5", "#0E7C86", "#5B6BB5", "#1F8A5B", "#9B5FA8", "#B07A2B"];
 
-/** Stable color for a target series. Dev/limited targets are always the muted gray. */
-export function seriesColor(isFullLlm: boolean, fullIndex: number): string {
-  if (!isFullLlm) return DEV_COLOR;
-  return LLM_PALETTE[fullIndex % LLM_PALETTE.length];
+/** Stable palette color for a target series by its order index (all targets first-class). */
+export function seriesColor(index: number): string {
+  return SERIES_PALETTE[index % SERIES_PALETTE.length];
 }
 
 // Competitive-position buckets on a favourable→unfavourable scale (green → amber → red → gray).

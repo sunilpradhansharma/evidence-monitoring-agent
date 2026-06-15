@@ -163,6 +163,16 @@ class LLMTarget(BaseModel):
     personas: list[Persona] = Field(default_factory=list)
     active: bool = True
     tos_acknowledged: bool = False
+    # Explicit, config-sourced classification of what this target IS (Principle V — config-driven).
+    # "llm" = general-purpose public LLM; "synthesis" = literature-synthesis target (PubMed +
+    # Claude); "provider-api" = a real commercial clinical provider API (e.g. the future Open
+    # Evidence). Drives presentation only — never capture/scoring/alert logic. All kinds are
+    # first-class in the dashboard; this is NOT a persona-coverage proxy.
+    kind: str = "llm"
+    # Optional human-facing label shown wherever the target surfaces (dashboard / responses / alerts
+    # / comparison / CLI). Falls back to ``llm_name`` when unset. The single source of truth for the
+    # display label — the frontend consumes it rather than hard-coding any slug.
+    display_name: str | None = None
 
     def serves(self, persona: Persona) -> bool:
         """Whether this target receives the given persona's questions.

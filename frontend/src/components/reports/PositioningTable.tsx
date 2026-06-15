@@ -1,11 +1,12 @@
 import type { Report } from "../../api";
-import { targetLabel } from "../../targets";
+import { useTargets } from "../../state/targets";
 
 function short(pos: string): string {
   return pos.toLowerCase().replace(/_/g, " ");
 }
 
 export default function PositioningTable({ positioning }: { positioning: Report["positioning"] }) {
+  const { labelFor } = useTargets();
   const { order, rows } = positioning;
   if (!rows.length) return <p className="italic text-ink-soft">No scored responses in view.</p>;
   return (
@@ -29,7 +30,7 @@ export default function PositioningTable({ positioning }: { positioning: Report[
         <tbody>
           {rows.map((row) => (
             <tr key={row.model} className="hover:bg-brand-soft">
-              <td className="border-b border-hair px-3 py-2 font-medium">{targetLabel(row.model)}</td>
+              <td className="border-b border-hair px-3 py-2 font-medium">{labelFor(row.model)}</td>
               {order.map((p) => (
                 <td key={p} className="border-b border-hair px-3 py-2 text-right tabular-nums">
                   {row.counts[p] ?? 0}

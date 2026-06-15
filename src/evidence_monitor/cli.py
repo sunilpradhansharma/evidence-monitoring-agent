@@ -59,7 +59,7 @@ from evidence_monitor.scoring.scorer import Scorer
 _LOGGER = get_logger("evidence_monitor.cli")
 
 # Display names for targets whose id slug should not be shown raw (structural labels, not regulated
-# content). Keeps the dev stand-in shown as "Provider evidence (dev)" — never as "Open Evidence".
+# content). Keeps the synthesis target shown as "Synthesized Evidence" — never as "Open Evidence".
 _TARGET_DISPLAY: dict[str, str] = {"provider-evidence-dev": _PROVIDER_EVIDENCE_DEV_NAME}
 
 

@@ -1,9 +1,5 @@
 import type { Report } from "../../api";
-import {
-  isProviderEvidenceDev,
-  PROVIDER_EVIDENCE_DEV_NOTE,
-  targetLabel,
-} from "../../targets";
+import TargetLabel from "../dashboard/TargetLabel";
 import { cellStyle, CELL_STYLES, LEGEND_ORDER } from "./cells";
 
 export default function CoverageMap({
@@ -37,17 +33,7 @@ export default function CoverageMap({
               {models.map((m) => (
                 <th key={m} className="px-2 pb-2 text-center text-sm font-bold text-ink">
                   <span className="inline-flex items-center justify-center gap-1">
-                    {targetLabel(m)}
-                    {isProviderEvidenceDev(m) && (
-                      <span
-                        role="img"
-                        aria-label={PROVIDER_EVIDENCE_DEV_NOTE}
-                        title={PROVIDER_EVIDENCE_DEV_NOTE}
-                        className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-brand-line bg-brand-soft text-[0.6rem] font-bold text-brand-dark"
-                      >
-                        i
-                      </span>
-                    )}
+                    <TargetLabel name={m} />
                   </span>
                 </th>
               ))}
@@ -101,12 +87,6 @@ export default function CoverageMap({
           </tbody>
         </table>
       </div>
-      {models.some(isProviderEvidenceDev) && (
-        <p className="mt-3 rounded-lg border border-brand-line bg-brand-soft px-3 py-2 text-xs leading-relaxed text-ink-soft">
-          <span aria-hidden="true">ⓘ </span>
-          {PROVIDER_EVIDENCE_DEV_NOTE}
-        </p>
-      )}
     </div>
   );
 }

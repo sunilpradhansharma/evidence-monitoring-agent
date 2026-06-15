@@ -7,29 +7,23 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { Dashboard, DashTarget } from "../../api";
+import type { Dashboard } from "../../api";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
-import { targetLabel } from "../../targets";
+import { useTargets } from "../../state/targets";
 import { seriesColor } from "./colors";
 import SeriesLegend from "./SeriesLegend";
 
 export default function SentimentHistogram({
   histogram,
-  targets,
 }: {
   histogram: Dashboard["sentiment_histogram"];
-  targets: DashTarget[];
 }) {
   const reduced = useReducedMotion();
+  const { labelFor } = useTargets();
   const edges = histogram.bucket_edges;
-  const metaById = new Map(targets.map((t) => [t.target_id, t]));
 
-  let fullIndex = 0;
-  const colored = histogram.series.map((s) => {
-    const full = metaById.get(s.target_id)?.is_full_llm ?? true;
-    const color = seriesColor(full, full ? fullIndex++ : 0);
-    return { ...s, color };
-  });
+  // Every target is first-class — assign palette colors by series order (no special "dev" color).
+  const colored = histogram.series.map((s, i) => ({ ...s, color: seriesColor(i) }));
 
   if (!colored.length) {
     return <p className="text-sm text-ink-soft">No scored responses for these filters.</p>;
@@ -51,7 +45,7 @@ export default function SentimentHistogram({
           <XAxis dataKey="bucket" tick={{ fontSize: 11, fill: "#5A6675" }} />
           <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#5A6675" }} />
           <Tooltip
-            formatter={(v: number, name: string) => [v, targetLabel(name)]}
+            formatter={(v: number, name: string) => [v, labelFor(name)]}
             labelFormatter={(l) => `sentiment ≈ ${l}`}
             contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #E3E8EE" }}
           />

@@ -1,12 +1,10 @@
 import type { DashTarget } from "../../api";
-import { targetLabel } from "../../targets";
 import TargetLabel from "./TargetLabel";
 
 export interface DashFilterState {
   persona: string;
   therapeutic_area: string;
   period: string;
-  include_dev: boolean;
   llms: string[];
 }
 
@@ -29,10 +27,6 @@ const PERIODS = [
 
 export default function FilterBar({ options, targets, value, onChange }: Props) {
   const set = (patch: Partial<DashFilterState>) => onChange({ ...value, ...patch });
-
-  const fullLlms = targets.filter((t) => t.is_full_llm).map((t) => t.target_id);
-  const hasDev = targets.some((t) => !t.is_full_llm);
-  const devTarget = targets.find((t) => !t.is_full_llm);
 
   const toggleLlm = (id: string) => {
     const next = value.llms.includes(id)
@@ -106,13 +100,14 @@ export default function FilterBar({ options, targets, value, onChange }: Props) 
           </div>
         </div>
 
-        {/* LLM multi-select */}
+        {/* Target multi-select — all targets are first-class (LLMs + synthesis + provider-api) */}
         <div className="flex flex-col gap-1">
           <span className="text-[0.7rem] font-bold uppercase tracking-wide text-ink-faint">
-            LLMs {value.llms.length ? `(${value.llms.length})` : "(all)"}
+            Targets {value.llms.length ? `(${value.llms.length})` : "(all)"}
           </span>
           <div className="flex flex-wrap gap-1.5">
-            {fullLlms.map((id) => {
+            {targets.map((t) => {
+              const id = t.target_id;
               const active = value.llms.length === 0 || value.llms.includes(id);
               return (
                 <button
@@ -125,9 +120,9 @@ export default function FilterBar({ options, targets, value, onChange }: Props) 
                       ? "border-brand bg-brand-soft text-brand-dark"
                       : "border-hair bg-surface text-ink-faint hover:bg-surface-muted",
                   ].join(" ")}
-                  title={value.llms.length === 0 ? "All LLMs shown — click to focus on this one" : ""}
+                  title={value.llms.length === 0 ? "All targets shown — click to focus on this one" : ""}
                 >
-                  {targetLabel(id)}
+                  <TargetLabel name={id} />
                 </button>
               );
             })}
@@ -142,20 +137,6 @@ export default function FilterBar({ options, targets, value, onChange }: Props) 
             )}
           </div>
         </div>
-
-        {/* Include-dev toggle (only when a limited/dev target is present) */}
-        {hasDev && (
-          <label className="flex cursor-pointer items-center gap-2 self-end pb-1.5">
-            <input
-              type="checkbox"
-              className="h-4 w-4 accent-brand"
-              checked={value.include_dev}
-              onChange={(e) => set({ include_dev: e.target.checked })}
-            />
-            <span className="text-sm font-medium text-ink-soft">Include</span>
-            {devTarget && <TargetLabel name={devTarget.target_id} className="text-sm text-ink-soft" />}
-          </label>
-        )}
       </div>
     </div>
   );

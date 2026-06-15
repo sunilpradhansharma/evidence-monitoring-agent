@@ -1,11 +1,11 @@
-"""Unit tests for the optional 'provider-evidence-dev' target — a DEV stand-in for the future Open
-Evidence Provider target (PubMed E-utilities + Claude synthesis).
+"""Unit tests for the 'provider-evidence-dev' target — the first-class literature-synthesis target
+"Synthesized Evidence" (PubMed E-utilities + Claude synthesis).
 
 Everything is exercised with the E-utilities HTTP calls and the Claude client MOCKED — NO live
 network. The tests assert the two-step flow, that PMIDs are recorded in the (immutable) response
-provenance, that the target is an active PROVIDER-only target (operator-enabled in config) while a
-deliberately-inactive fixture is gated out, that the display name is "Provider evidence (dev)", and
-that the target's name is NEVER the literal string "Open Evidence".
+provenance, that the target is an active, first-class PROVIDER-only synthesis target (kind
+'synthesis') while a deliberately-inactive fixture is gated out, that the display name is
+"Synthesized Evidence", and that the target's name NEVER contains "Open Evidence".
 """
 
 from __future__ import annotations
@@ -156,18 +156,20 @@ def _inactive_fixture_target() -> LLMTarget:
     )
 
 
-def test_dev_target_is_active_provider_only():
-    # The operator has enabled provider-evidence-dev in config: it is an active, PROVIDER-only
-    # target that surfaces like any other active target.
+def test_synthesis_target_is_active_provider_only_first_class():
+    # The synthesis target is active, PROVIDER-only, and first-class (kind 'synthesis' — NOT a dev
+    # stand-in and NOT persona-gated out). Its display label is "Synthesized Evidence".
     target = _dev_target()
     assert target.active is True
     assert target.tos_acknowledged is True
     assert target.personas == [Persona.PROVIDER]
+    assert target.kind == "synthesis"
+    assert target.display_name == "Synthesized Evidence"
 
 
 def test_inactive_target_is_gated_out():
     # Inactive-path coverage against a deliberately-inactive fixture: persona gating
-    # (active AND serves-persona) excludes it from every run, while the active dev target stays in.
+    # (active AND serves-persona) excludes it from every run, while the synthesis target stays in.
     inactive = _inactive_fixture_target()
     assert inactive.active is False
     assert inactive.tos_acknowledged is False
@@ -175,16 +177,19 @@ def test_inactive_target_is_gated_out():
     assert [t.target_id for t in eligible] == ["provider-evidence-dev"]
 
 
-def test_display_name_is_provider_evidence_dev():
-    assert DISPLAY_NAME == "Provider evidence (dev)"
-    assert ProviderEvidenceDevAdapter.DISPLAY_NAME == "Provider evidence (dev)"
+def test_display_name_is_synthesized_evidence():
+    assert DISPLAY_NAME == "Synthesized Evidence"
+    assert ProviderEvidenceDevAdapter.DISPLAY_NAME == "Synthesized Evidence"
 
 
 def test_target_name_is_never_open_evidence():
+    # The synthesis target must NEVER be labeled with anything containing "Open Evidence" — it uses
+    # no Open Evidence data. (That phrase may appear only in the note, as what this target is NOT.)
     target = _dev_target()
     assert target.target_id == "provider-evidence-dev"
     assert target.llm_name == "provider-evidence-dev"
-    for label in (target.target_id, target.llm_name, DISPLAY_NAME):
+    labels = (target.target_id, target.llm_name, target.display_name or "", DISPLAY_NAME)
+    for label in labels:
         assert "Open Evidence" not in label
 
 

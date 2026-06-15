@@ -21,6 +21,7 @@ targets:
     personas: [PROSPECT, PROVIDER, PATIENT]
     active: true
     tos_acknowledged: true
+    kind: llm
     prices:
       input_per_1k: 0.0025
       output_per_1k: 0.01
@@ -40,6 +41,7 @@ targets:
     personas: [PROSPECT, PROVIDER, PATIENT]
     active: true
     tos_acknowledged: true
+    kind: llm
     prices:
       input_per_1k: 0.00125
       output_per_1k: 0.005
@@ -55,12 +57,15 @@ targets:
     personas: [PROSPECT, PROVIDER, PATIENT]
     active: true
     tos_acknowledged: true
+    kind: llm
     prices:
       input_per_1k: 0.003
       output_per_1k: 0.015
 
-  # Conditional: Provider-persona only, and only when API access is confirmed.
-  # Left inactive by default so its absence never counts against the capture rate.
+  # The real commercial clinical-evidence provider API (kind: provider-api). Conditional:
+  # Provider-persona only, and only when API access is confirmed. Left inactive by default so its
+  # absence never counts against the capture rate. When activated it is a FIRST-CLASS production
+  # provider (not synthesis, not a dev stand-in).
   - target_id: open-evidence
     llm_name: open-evidence
     model_version: open-evidence-v1
@@ -72,15 +77,16 @@ targets:
     personas: [PROVIDER]
     active: false
     tos_acknowledged: false
+    kind: provider-api
     prices:
       input_per_1k: 0.0
       output_per_1k: 0.0
 
-  # OPTIONAL development stand-in for the Open Evidence Provider target (PubMed + Claude synthesis);
-  # NOT Open Evidence; not for stakeholder reporting until replaced by the real Open Evidence API
-  # adapter. Provider-persona only, inactive by default. Step 1 searches public PubMed E-utilities
-  # for the question; step 2 has Claude synthesize a cited answer from those abstracts. Output will
-  # differ from Open Evidence's own and exists only to exercise the Provider pipeline.
+  # "Synthesized Evidence" (kind: synthesis) — a literature-synthesis target shown first-class
+  # alongside the LLMs. It synthesizes PUBLISHED medical literature from public PubMed (E-utilities)
+  # using Claude: step 1 searches PubMed for the question; step 2 has Claude write a PMID-cited
+  # answer from those abstracts. It is NOT Open Evidence and uses NO Open Evidence data; its output
+  # is its own. Provider-persona only (so it has no answer for prospect/patient questions).
   - target_id: provider-evidence-dev
     llm_name: provider-evidence-dev
     model_version: pubmed-eutils+claude-synthesis
@@ -92,6 +98,8 @@ targets:
     personas: [PROVIDER]
     active: true
     tos_acknowledged: true
+    kind: synthesis
+    display_name: "Synthesized Evidence"
     prices:
       input_per_1k: 0.0
       output_per_1k: 0.0

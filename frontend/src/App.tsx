@@ -7,11 +7,13 @@ import ComparisonPage from "./pages/ComparisonPage";
 import QuestionsPage from "./pages/QuestionsPage";
 import RunsPage from "./pages/RunsPage";
 import { ReviewerProvider } from "./state/reviewer";
+import { TargetsProvider } from "./state/targets";
 
 export default function App() {
   return (
     <ReviewerProvider>
-      <Routes>
+      <TargetsProvider>
+        <Routes>
         <Route element={<AppLayout />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/responses" element={<ResponsesPage />} />
@@ -23,7 +25,8 @@ export default function App() {
           <Route path="/runs" element={<RunsPage />} />
           <Route path="*" element={<DashboardPage />} />
         </Route>
-      </Routes>
+        </Routes>
+      </TargetsProvider>
     </ReviewerProvider>
   );
 }

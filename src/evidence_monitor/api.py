@@ -49,6 +49,7 @@ from evidence_monitor.dashboard.json_api import (
     response_payload,
     responses_table_payload,
     runs_payload,
+    targets_payload,
 )
 from evidence_monitor.dashboard.render import (
     build_approved_questions,
@@ -506,14 +507,24 @@ def _register_api(app: FastAPI) -> None:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=f"unknown run_id: {run_id}") from exc
 
+    @app.get("/api/targets")
+    def api_targets(settings: SettingsDep):
+        """Configured targets with their config-sourced kind + display label (read-only).
+
+        The single source of truth the frontend uses to label/classify any target by name."""
+        try:
+            targets = load_targets(settings.targets_config_path)
+        except (OSError, ValueError):
+            targets = None
+        return targets_payload(targets)
+
     @app.get("/api/dashboard")
     def api_dashboard(request: Request, store: StoreDep, settings: SettingsDep):
         """Dashboard aggregate honoring the filter bar (persona / LLM multi-select / therapy /
-        period) plus the ``include_dev`` toggle. Read-only; reuses ``build_dashboard``.
+        period / run). Read-only; reuses ``build_dashboard``.
 
-        The PROVIDER-only dev stand-in is excluded by default (``include_dev`` falsey) so the three
-        general LLMs are the clean comparison; pass ``include_dev=true`` to fold it in. Per-target
-        classification is always returned so the UI can render the toggle and distinguish targets.
+        Every target is first-class — the synthesis target appears alongside the LLMs by default.
+        Per-target ``kind`` + ``display_name`` are returned so the UI labels series from config.
         """
         params = request.query_params
         filters = QueryFilters(
@@ -525,12 +536,11 @@ def _register_api(app: FastAPI) -> None:
         try:
             targets = load_targets(settings.targets_config_path)
         except (OSError, ValueError):
-            targets = None  # classification falls back to "full LLM"; dashboard still renders
+            targets = None  # classification falls back to kind 'llm'; dashboard still renders
         return dashboard_payload(
             store,
             filters=filters,
             llms=_llms_from_params(params),
-            include_dev=bool(_as_bool(params.get("include_dev"))),
             targets=targets,
         )
 

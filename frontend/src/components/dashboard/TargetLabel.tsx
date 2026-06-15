@@ -1,25 +1,21 @@
-import {
-  PROVIDER_EVIDENCE_DEV_NOTE,
-  isProviderEvidenceDev,
-  targetLabel,
-} from "../../targets";
+import { useTargets } from "../../state/targets";
 
-/** A target's human label, with a "dev" badge + explanatory tooltip for the dev stand-in so it is
- *  always visibly distinguished from a general LLM (and never read as "Open Evidence"). */
-export default function TargetLabel({
-  name,
-  className = "",
-}: {
-  name: string;
-  className?: string;
-}) {
-  const dev = isProviderEvidenceDev(name);
+/** A target's human label, sourced from the backend (config) via TargetsContext. Targets that carry
+ *  an explanatory note (e.g. the synthesis target) get a small "ⓘ" info affordance with a tooltip —
+ *  NOT a "dev" badge. Every target is presented first-class. */
+export default function TargetLabel({ name, className = "" }: { name: string; className?: string }) {
+  const { labelFor, noteFor } = useTargets();
+  const note = noteFor(name);
   return (
-    <span className={`inline-flex items-center gap-1.5 ${className}`} title={dev ? PROVIDER_EVIDENCE_DEV_NOTE : undefined}>
-      <span>{targetLabel(name)}</span>
-      {dev && (
-        <span className="rounded-full border border-wrong-ink/30 bg-wrong-bg px-1.5 py-0.5 text-[0.6rem] font-bold uppercase leading-none tracking-wide text-wrong-ink">
-          dev
+    <span className={`inline-flex items-center gap-1 ${className}`} title={note}>
+      <span>{labelFor(name)}</span>
+      {note && (
+        <span
+          aria-label={note}
+          className="cursor-help text-[0.7em] font-bold text-ink-faint"
+          title={note}
+        >
+          ⓘ
         </span>
       )}
     </span>

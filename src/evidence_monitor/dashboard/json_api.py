@@ -199,8 +199,8 @@ def _dashboard_to_dict(data: DashboardData) -> dict:
     """Serialize a :class:`DashboardData` (from ``render.build_dashboard``) to a JSON dict.
 
     Pure serialization — every figure is already computed by ``build_dashboard``. Per-target
-    classification (``is_full_llm`` / ``kind``) is surfaced so the frontend can tell a general LLM
-    from a limited/dev target (e.g. the provider-only stand-in) and label it accordingly.
+    ``kind`` + ``display_name`` are surfaced so the frontend labels each series from one source of
+    truth (no hard-coded slug). All target kinds are first-class (no exclusion).
     """
     k = data.kpis
     run = k.last_run
@@ -215,7 +215,6 @@ def _dashboard_to_dict(data: DashboardData) -> dict:
             "total_tokens": run.total_tokens,
         }
     return {
-        "include_dev": data.include_dev,
         "filters": data.filters,
         "options": {
             "personas": data.options.personas,
@@ -223,12 +222,7 @@ def _dashboard_to_dict(data: DashboardData) -> dict:
             "therapeutic_areas": data.options.therapeutic_areas,
         },
         "targets": [
-            {
-                "target_id": t.target_id,
-                "display_name": t.display_name,
-                "is_full_llm": t.is_full_llm,
-                "kind": t.kind,
-            }
+            {"target_id": t.target_id, "display_name": t.display_name, "kind": t.kind}
             for t in data.targets
         ],
         "kpis": {
@@ -298,14 +292,29 @@ def dashboard_payload(
     *,
     filters: QueryFilters | None = None,
     llms: set[str] | None = None,
-    include_dev: bool = False,
     targets: list[LLMTarget] | None = None,
 ) -> dict:
     """Full Dashboard aggregate honoring the filter bar (read-only). Reuses ``build_dashboard``."""
-    data = build_dashboard(
-        store, filters=filters, llms=llms, include_dev=include_dev, targets=targets
-    )
+    data = build_dashboard(store, filters=filters, llms=llms, targets=targets)
     return _dashboard_to_dict(data)
+
+
+def targets_payload(targets: list[LLMTarget] | None) -> list[dict]:
+    """Configured targets with their config-sourced ``kind`` + ``display_name`` (read-only).
+
+    The single source of truth the frontend uses to label/classify any target by name — so no slug
+    or display string is hard-coded client-side. ``display_name`` falls back to ``llm_name``.
+    """
+    return [
+        {
+            "target_id": t.target_id,
+            "llm_name": t.llm_name,
+            "display_name": t.display_name or t.llm_name,
+            "kind": t.kind,
+            "active": t.active,
+        }
+        for t in (targets or [])
+    ]
 
 
 def responses_table_payload(
@@ -523,4 +532,5 @@ __all__ = [
     "response_payload",
     "responses_table_payload",
     "runs_payload",
+    "targets_payload",
 ]

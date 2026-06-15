@@ -12,13 +12,14 @@ import { Select } from "../components/common/Controls";
 import { SentimentChip } from "../components/common/StatusBadge";
 import { POSITION_LABELS } from "../components/dashboard/colors";
 import TargetLabel from "../components/dashboard/TargetLabel";
-import { PROVIDER_EVIDENCE_DEV, isProviderEvidenceDev } from "../targets";
+import { useTargets } from "../state/targets";
 
 const tc = (s: string) => s.charAt(0) + s.slice(1).toLowerCase();
 const captured = (c: ComparisonColumn) =>
   (c.status === "SUCCESS" || c.status === "TRUNCATED") && c.response_text.trim().length > 0;
 
 export default function ComparisonPage() {
+  const { kindOf, synthesisTargetId } = useTargets();
   const [questions, setQuestions] = useState<QuestionItem[]>([]);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [qid, setQid] = useState("");
@@ -61,11 +62,13 @@ export default function ComparisonPage() {
 
   if (error) return <p className="mt-6 text-neg-ink">Could not load comparison: {error}</p>;
 
-  // If a PROVIDER question has no dev-target column, show an explicit "no response" ghost column.
-  const showDevGhost =
-    data &&
+  // If a PROVIDER question has no synthesis-target column, show an explicit "no response" column
+  // (the synthesis target is provider-persona only, so this is its honest absence — not a blank).
+  const showSynthGhost =
+    !!data &&
     data.persona === "PROVIDER" &&
-    !data.columns.some((c) => isProviderEvidenceDev(c.llm_name));
+    !!synthesisTargetId &&
+    !data.columns.some((c) => kindOf(c.llm_name) === "synthesis");
 
   return (
     <div>
@@ -125,14 +128,14 @@ export default function ComparisonPage() {
             <p className="mt-1 text-sm text-ink-soft">{tc(data.persona)} · run {data.run_id.slice(0, 8)}</p>
           </div>
 
-          {data.columns.length === 0 && !showDevGhost ? (
+          {data.columns.length === 0 && !showSynthGhost ? (
             <p className="mt-6 text-ink-soft">No responses for this question in this run.</p>
           ) : (
             <div className="mt-4 flex gap-4 overflow-x-auto pb-2">
               {data.columns.map((c) => (
                 <ColumnCard key={c.response_id} col={c} />
               ))}
-              {showDevGhost && <GhostDevColumn />}
+              {showSynthGhost && synthesisTargetId && <GhostColumn name={synthesisTargetId} />}
             </div>
           )}
         </>
@@ -176,12 +179,12 @@ function ColumnCard({ col }: { col: ComparisonColumn }) {
   );
 }
 
-/** Honest placeholder when a PROVIDER question has no Provider evidence (dev) answer in this run. */
-function GhostDevColumn() {
+/** Honest placeholder when a PROVIDER question has no answer from the given (synthesis) target. */
+function GhostColumn({ name }: { name: string }) {
   return (
     <div className="card flex w-80 shrink-0 flex-col border-dashed p-4">
       <div className="font-semibold text-ink">
-        <TargetLabel name={PROVIDER_EVIDENCE_DEV} />
+        <TargetLabel name={name} />
       </div>
       <div className="mt-3 border-t border-hair pt-3 text-sm text-ink-faint">
         no response for this question in this run

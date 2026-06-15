@@ -1,5 +1,5 @@
 import type { AlertItem } from "../../api";
-import { targetLabel } from "../../targets";
+import { useTargets } from "../../state/targets";
 
 const SEV_BADGE: Record<number, string> = {
   3: "bg-wrong-bg text-wrong-ink border-wrong-ink/30",
@@ -13,6 +13,7 @@ const SEV_BAR: Record<number, string> = {
 };
 
 export default function AlertsList({ alerts }: { alerts: AlertItem[] }) {
+  const { labelFor } = useTargets();
   if (!alerts.length) return <p className="italic text-ink-soft">No alerts in view.</p>;
   return (
     <div className="space-y-3">
@@ -30,7 +31,7 @@ export default function AlertsList({ alerts }: { alerts: AlertItem[] }) {
               sev {a.severity}
             </span>
             <span className="id font-extrabold">{a.question_id}</span>
-            <span className="tag tag-muted">{targetLabel(a.model)}</span>
+            <span className="tag tag-muted">{labelFor(a.model)}</span>
             <span className="tag tag-muted">{a.persona.toLowerCase()}</span>
             {a.rules.map((r, i) => (
               <span key={i} className="pill border-brand-line bg-brand-soft text-brand-dark">

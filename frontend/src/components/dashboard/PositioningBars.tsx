@@ -9,15 +9,23 @@ import {
 } from "recharts";
 import type { Dashboard } from "../../api";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
-import { isProviderEvidenceDev, targetLabel } from "../../targets";
+import { useTargets } from "../../state/targets";
 import { POSITION_COLORS, POSITION_LABELS } from "./colors";
 
-function TargetTick({ x, y, payload }: { x: number; y: number; payload: { value: string } }) {
-  const name = payload.value;
+function TargetTick({
+  x,
+  y,
+  payload,
+  labelFor,
+}: {
+  x: number;
+  y: number;
+  payload: { value: string };
+  labelFor: (name: string) => string;
+}) {
   return (
     <text x={x - 6} y={y} dy={4} textAnchor="end" fontSize={11} fill="#5A6675">
-      {targetLabel(name)}
-      {isProviderEvidenceDev(name) ? "  (dev)" : ""}
+      {labelFor(payload.value)}
     </text>
   );
 }
@@ -28,6 +36,7 @@ export default function PositioningBars({
   positioning: Dashboard["positioning"];
 }) {
   const reduced = useReducedMotion();
+  const { labelFor } = useTargets();
   if (!positioning.series.length) {
     return <p className="text-sm text-ink-soft">No scored responses for these filters.</p>;
   }
@@ -60,12 +69,12 @@ export default function PositioningBars({
           <YAxis
             type="category"
             dataKey="name"
-            tick={(props) => <TargetTick {...props} />}
+            tick={(props) => <TargetTick {...props} labelFor={labelFor} />}
             width={1}
           />
           <Tooltip
             formatter={(v: number, name: string) => [`${v}%`, POSITION_LABELS[name] ?? name]}
-            labelFormatter={(l) => targetLabel(String(l))}
+            labelFormatter={(l) => labelFor(String(l))}
             contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #E3E8EE" }}
           />
           {positioning.order.map((pos) => (

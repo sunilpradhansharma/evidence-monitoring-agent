@@ -571,22 +571,22 @@ def _iso_week(date_iso) -> str:
 
 @dataclass(frozen=True)
 class TargetMeta:
-    """Per-target classification so the UI can distinguish a general LLM from a limited/dev target.
+    """Per-target classification + display label, both sourced from config (Principle V).
 
-    ``is_full_llm`` is True when the target serves EVERY persona (the general-purpose LLMs); one
-    that serves only a subset of personas (the provider-only dev stand-in) is limited. Content-
-    agnostic: only structural provider ids and personas are read — never brand/indication names.
+    ``kind`` is the explicit config classification ("llm" | "synthesis" | "provider-api"); all kinds
+    are first-class in the dashboard (no exclusion / no "dev" treatment). ``display_name`` is the
+    config label (falling back to the llm_name). Content-agnostic: only structural provider
+    ids / kinds / labels flow through — never brand/indication names.
     """
 
     target_id: str
     display_name: str
-    is_full_llm: bool
-    kind: str  # "llm" | "dev"
+    kind: str
 
 
 @dataclass(frozen=True)
 class DashboardKpis:
-    """The five KPI cards' numbers (all over the INCLUDED target set — see ``include_dev``)."""
+    """The five KPI cards' numbers (over all targets, optionally narrowed by the LLM filter)."""
 
     responses_total: int = 0
     responses_captured: int = 0
@@ -673,32 +673,30 @@ class DashboardData:
     recent_alerts: list[RecentAlert]
     options: ReportOptions
     filters: dict[str, str]
-    include_dev: bool
 
 
-def _target_metas(targets: list[LLMTarget] | None, llm_names: set[str]) -> dict[str, TargetMeta]:
-    """Classify every llm_name present in the data, using config personas (a target that serves all
-    personas is a full LLM; a strict subset is a limited/dev target). Unknown names default to full.
-    Display names come from config's structural ``llm_name``; the frontend relabels the dev target.
-    """
-    persona_count = len(Persona)
+# Stable chart ordering by kind, then name. All kinds are first-class; this only groups the columns.
+_KIND_RANK = {"llm": 0, "provider-api": 1, "synthesis": 2}
+
+
+def target_metas(targets: list[LLMTarget] | None, llm_names: set[str]) -> dict[str, TargetMeta]:
+    """Classify every llm_name, reading the explicit ``kind`` + ``display_name`` from config. Names
+    not present in config default to kind 'llm' with the raw name as label. No persona heuristic."""
     by_name = {t.llm_name: t for t in (targets or [])}
     metas: dict[str, TargetMeta] = {}
     for name in llm_names:
         t = by_name.get(name)
-        is_full = True if t is None else len(set(t.personas)) >= persona_count
         metas[name] = TargetMeta(
             target_id=name,
-            display_name=name,
-            is_full_llm=is_full,
-            kind="llm" if is_full else "dev",
+            display_name=(t.display_name or t.llm_name) if t is not None else name,
+            kind=t.kind if t is not None else "llm",
         )
     return metas
 
 
 def _ordered_targets(metas: dict[str, TargetMeta], present: set[str]) -> list[str]:
-    """Chart series/row order: full LLMs first (alphabetical), limited/dev targets last."""
-    return sorted(present, key=lambda n: (not metas[n].is_full_llm, n))
+    """Chart series/row order: grouped by kind (llm, provider-api, synthesis) then name."""
+    return sorted(present, key=lambda n: (_KIND_RANK.get(metas[n].kind, 9), n))
 
 
 def build_dashboard(
@@ -706,31 +704,24 @@ def build_dashboard(
     *,
     filters: QueryFilters | None = None,
     llms: set[str] | None = None,
-    include_dev: bool = False,
     targets: list[LLMTarget] | None = None,
 ) -> DashboardData:
     """Aggregate the Dashboard widgets from the read-only response repository.
 
-    ``filters`` (persona / therapeutic-area / date range) constrain the universe at the data layer;
-    ``llms`` (a multi-select) and ``include_dev`` are applied as view-layer filters in memory so the
-    data-access seam is unchanged. When ``include_dev`` is False (the default), responses from
-    limited/dev targets are excluded from EVERY widget and KPI, so the three general LLMs are the
-    clean default comparison. The full target classification is always returned so the UI can still
-    offer the "Include Provider evidence (dev)" toggle.
+    ``filters`` (persona / therapeutic-area / date range / run) constrain the universe at the data
+    layer; ``llms`` (the multi-select) is the only view-layer filter (the seam stays single-LLM).
+    Every target is first-class — there is no kind-based exclusion — so the synthesis target appears
+    alongside the LLMs by default. The full per-target classification (kind + display label) is
+    returned so the UI can label each series from one source of truth.
     """
     filters = filters or QueryFilters()
     universe = store.responses.query(filters, page_size=None).items
 
-    # Classify every target present in the persona/therapy/period universe (before llm/dev gating)
-    # so the toggle + multiselect stay stable regardless of what is currently included.
-    metas = _target_metas(targets, {r.llm_name for r in universe})
+    # Classify every target present in the persona/therapy/period universe (before the llm multi-
+    # select) so the chart legend + the LLM filter stay stable regardless of the current selection.
+    metas = target_metas(targets, {r.llm_name for r in universe})
 
-    def _included(r: Response) -> bool:
-        if llms is not None and r.llm_name not in llms:
-            return False
-        return include_dev or metas[r.llm_name].is_full_llm
-
-    responses = [r for r in universe if _included(r)]
+    responses = [r for r in universe if llms is None or r.llm_name in llms]
 
     # Single pass: latest score per response feeds sentiment / position / heatmap; status feeds
     # volume + capture. Mirrors build_report's accumulation (no new judgement).
@@ -841,7 +832,6 @@ def build_dashboard(
         recent_alerts=recent,
         options=_options(store),
         filters={k: v for k, v in _filter_echo(filters).items() if v},
-        include_dev=include_dev,
     )
 
 
@@ -1313,6 +1303,7 @@ __all__ = [
     "build_report",
     "build_responses_table",
     "latest_per_question",
+    "target_metas",
     "render_app",
     "render_reports_section",
     "render_static_report",

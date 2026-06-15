@@ -271,6 +271,7 @@ def test_api_endpoints_never_write(client):
     assert client.get("/api/responses/R1").status_code == 200
     assert client.get("/api/responses").status_code == 200
     assert client.get("/api/alerts").status_code == 200
+    assert client.get("/api/targets").status_code == 200
     assert (
         client.get("/api/comparison", params={"question_id": "Q-1", "run_id": rid}).status_code
         == 200
@@ -353,3 +354,28 @@ def test_api_questions_enriched_fields(client):
     q = client.get("/api/questions", params={"status": "APPROVED"}).json()["questions"][0]
     assert "brand_focus" in q and "active" in q
     assert q["active"] is True
+
+
+# --------------------------------------------------------------------------- #
+# /api/targets — config-sourced kind + display label (single source of truth for the frontend)
+# --------------------------------------------------------------------------- #
+def test_api_targets_kinds_and_labels(client):
+    targets = {t["target_id"]: t for t in client.get("/api/targets").json()}
+    # The synthesis target is first-class with its honest display label and kind.
+    synth = targets["provider-evidence-dev"]
+    assert synth["kind"] == "synthesis"
+    assert synth["display_name"] == "Synthesized Evidence"
+    # The future real provider keeps a distinct kind (production provider, not synthesis/dev).
+    assert targets["open-evidence"]["kind"] == "provider-api"
+    # General LLMs are kind "llm".
+    assert targets["openai-gpt4o"]["kind"] == "llm"
+
+
+def test_synthesis_target_never_labeled_open_evidence(client):
+    # The synthesis target must NEVER be labeled with anything containing "Open Evidence" — it uses
+    # no Open Evidence data. (The real open-evidence provider-api target may be named that later.)
+    synth = next(
+        t for t in client.get("/api/targets").json() if t["target_id"] == "provider-evidence-dev"
+    )
+    for field in (synth["target_id"], synth["llm_name"], synth["display_name"], synth["kind"]):
+        assert "Open Evidence" not in field

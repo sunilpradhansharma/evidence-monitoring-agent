@@ -41,7 +41,7 @@ export default function ResponsesPage() {
 
   useEffect(() => {
     getRuns().then(setRuns).catch(() => setRuns([]));
-    getDashboard({ include_dev: true }).then(setMeta).catch(() => setMeta(null));
+    getDashboard({}).then(setMeta).catch(() => setMeta(null));
   }, []);
 
   const query = useMemo(

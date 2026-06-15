@@ -155,8 +155,7 @@ export interface AlertRecord {
 export interface DashTarget {
   target_id: string;
   display_name: string;
-  is_full_llm: boolean;
-  kind: string; // "llm" | "dev"
+  kind: string; // "llm" | "synthesis" | "provider-api"
 }
 
 export interface DashKpis {
@@ -199,7 +198,6 @@ export interface DashRecentAlert {
 }
 
 export interface Dashboard {
-  include_dev: boolean;
   filters: Record<string, string>;
   options: { personas: string[]; llms: string[]; therapeutic_areas: string[] };
   targets: DashTarget[];
@@ -219,7 +217,6 @@ export interface DashboardFilters {
   persona?: string;
   therapeutic_area?: string;
   period?: string;
-  include_dev?: boolean;
   llms?: string[];
 }
 
@@ -229,10 +226,20 @@ export function getDashboard(f: DashboardFilters): Promise<Dashboard> {
   if (f.persona) p.set("persona", f.persona);
   if (f.therapeutic_area) p.set("therapeutic_area", f.therapeutic_area);
   if (f.period) p.set("period", f.period);
-  if (f.include_dev) p.set("include_dev", "true");
   (f.llms ?? []).forEach((l) => p.append("llm", l));
   return getJSON<Dashboard>(`/api/dashboard?${p.toString()}`);
 }
+
+// Configured targets with their config-sourced kind + display label — the single source of truth
+// the frontend uses to label/classify any target by name (no hard-coded slug).
+export interface TargetInfo {
+  target_id: string;
+  llm_name: string;
+  display_name: string;
+  kind: string;
+  active: boolean;
+}
+export const getTargets = () => getJSON<TargetInfo[]>("/api/targets");
 
 // --- Responses table (Stage 3) --------------------------------------------------------------- //
 export interface ResponseRow {

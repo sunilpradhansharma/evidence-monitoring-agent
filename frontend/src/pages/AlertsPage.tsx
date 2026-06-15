@@ -48,7 +48,7 @@ export default function AlertsPage() {
   const [pageSize, setPageSize] = useState(25);
 
   useEffect(() => {
-    getDashboard({ include_dev: true }).then(setMeta).catch(() => setMeta(null));
+    getDashboard({}).then(setMeta).catch(() => setMeta(null));
   }, []);
 
   const query = useMemo(

@@ -1,9 +1,11 @@
-"""Provider evidence (dev) — an OPTIONAL development stand-in for the future Open Evidence target.
+"""Synthesized Evidence — a literature-synthesis monitored target (PubMed E-utilities + Claude).
 
-This is a DEV / REFERENCE target only. It exercises the Provider-persona pipeline end-to-end while
-real Open Evidence API access (and Legal/ToS sign-off) is pending. It is **NOT** Open Evidence, and
-its output must never be presented as, or attributed to, Open Evidence — it is clearly labelled
-"Provider evidence (dev)" everywhere it appears. It is ``active: false`` by default in config.
+This target is a first-class, Provider-persona literature-synthesis target: it synthesizes PUBLISHED
+medical literature from public PubMed (E-utilities) using Claude. It is **NOT** Open Evidence and
+uses NO Open Evidence data; its output is its own and must never be presented as, or attributed to,
+Open Evidence. It is labelled **"Synthesized Evidence"** everywhere it appears (``kind: synthesis``
+in config). The class/module keep their original ``provider_evidence_dev`` identifiers so stored
+provenance (``llm_name``) and the adapter registry stay stable.
 
 How it works (two steps, both behind this adapter and the existing retry/backoff seam):
 
@@ -55,14 +57,14 @@ _EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 # Default number of abstracts to retrieve per question (kept small — NCBI usage policy + relevance).
 _DEFAULT_RETMAX = 5
 
-# The canonical display name. This is a structural/provider label (NOT a drug/competitor/indication
-# name), shown wherever the target surfaces. It deliberately does NOT contain "Open Evidence".
-DISPLAY_NAME = "Provider evidence (dev)"
+# The canonical display name. Structural/provider label (NOT a drug/competitor/indication name),
+# shown wherever the target surfaces. It deliberately does NOT contain "Open Evidence". This mirrors
+# the config ``display_name`` for this target (kept in sync; config is the source for surfaced UI).
+DISPLAY_NAME = "Synthesized Evidence"
 
-# Provenance footer marker (also makes clear this is the dev stand-in, not Open Evidence's output).
+# Provenance footer marker (makes clear this is literature synthesis, not Open Evidence's output).
 _SOURCES_HEADER = (
-    "—— Sources (Provider evidence (dev): PubMed E-utilities + Claude synthesis; "
-    "NOT Open Evidence) ——"
+    "—— Sources (Synthesized Evidence: PubMed E-utilities + Claude synthesis; NOT Open Evidence) ——"
 )
 
 # Synthesis prompt: abstracts-only, cite PMIDs inline, no outside knowledge. Content-agnostic.
